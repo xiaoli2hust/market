@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>MARKET — Daily Intelligence Bulletin</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT,WONK@9..144,300..900,0..100,0..1&family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..600&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --paper:#f3ece1;
+    --paper-2:#e9e0cf;
+    --ink:#181410;
+    --ink-2:#3a322a;
+    --rule:rgba(24,20,16,.18);
+    --rule-strong:rgba(24,20,16,.55);
+    --crimson:#b3361f;
+    --ochre:#c5871f;
+    --moss:#3d5a3a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0;background:var(--paper);color:var(--ink);
+    font-family:"Newsreader",Georgia,serif;font-optical-sizing:auto;
+    -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;z-index:99;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/><feColorMatrix values='0 0 0 0 0.09  0 0 0 0 0.08  0 0 0 0 0.06  0 0 0 0.10 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+    opacity:.35;mix-blend-mode:multiply;}
+  a{color:inherit;text-decoration:none}
+  .mono{font-family:"JetBrains Mono",ui-monospace,monospace;letter-spacing:.02em}
+  .display{font-family:"Fraunces",serif;font-variation-settings:"opsz" 144,"SOFT" 60,"WONK" 1}
+  .uppercase{text-transform:uppercase;letter-spacing:.18em}
+  .rule-top{border-top:1px solid var(--rule)}
+  .rule-bot{border-bottom:1px solid var(--rule)}
+
+  .frame{max-width:1280px;margin:0 auto;padding:28px 36px 80px}
+
+  /* ============ MASTHEAD ============ */
+  .masthead{display:grid;grid-template-columns:1fr auto 1fr;align-items:end;
+    border-bottom:3px double var(--ink);padding-bottom:14px;gap:24px}
+  .masthead .left,.masthead .right{font-size:11px;line-height:1.5}
+  .masthead .left{text-align:left}
+  .masthead .right{text-align:right}
+  .masthead .title{text-align:center}
+  .masthead .title h1{font-family:"Fraunces",serif;font-weight:900;
+    font-size:clamp(54px,7vw,108px);line-height:.85;margin:0;
+    letter-spacing:-.04em;font-variation-settings:"opsz" 144,"WONK" 1;}
+  .masthead .title .sub{font-size:11px;letter-spacing:.4em;text-transform:uppercase;margin-top:6px}
+  .masthead .stamp{display:inline-block;border:1.5px solid var(--ink);
+    padding:6px 10px;transform:rotate(-3deg);font-size:10px;letter-spacing:.2em;
+    text-transform:uppercase;background:var(--paper-2);}
+  .masthead .stamp.crimson{color:var(--crimson);border-color:var(--crimson)}
+
+  /* ============ HEADLINE BAR ============ */
+  .ribbon{display:flex;justify-content:space-between;align-items:baseline;
+    padding:8px 0;border-bottom:1px solid var(--rule);font-size:11px}
+  .ribbon .center{letter-spacing:.4em;text-transform:uppercase}
+  .ribbon .live::before{content:"●";color:var(--crimson);margin-right:6px;
+    animation:pulse 1.4s ease-in-out infinite}
+  @keyframes pulse{50%{opacity:.25}}
+
+  /* ============ HERO ============ */
+  .hero{display:grid;grid-template-columns:5fr 7fr;gap:36px;padding:32px 0 28px;
+    border-bottom:1px solid var(--rule);align-items:end}
+  .kicker{font-family:"JetBrains Mono",monospace;font-size:11px;
+    text-transform:uppercase;letter-spacing:.3em;color:var(--crimson)}
+  .headline{font-family:"Fraunces",serif;font-weight:600;font-size:clamp(40px,5.4vw,84px);
+    line-height:.95;letter-spacing:-.02em;margin:10px 0 14px;
+    font-variation-settings:"opsz" 144,"SOFT" 30}
+  .headline em{font-style:italic;font-variation-settings:"opsz" 144,"WONK" 1;color:var(--crimson)}
+  .dek{font-size:18px;line-height:1.55;color:var(--ink-2);max-width:46ch}
+  .byline{margin-top:18px;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--ink-2)}
+  .byline strong{color:var(--ink)}
+
+  .bignum{position:relative;text-align:right}
+  .bignum .label{font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:var(--ink-2)}
+  .bignum .value{font-family:"Fraunces",serif;font-weight:300;
+    font-size:clamp(140px,18vw,260px);line-height:.82;letter-spacing:-.06em;
+    font-variation-settings:"opsz" 144,"SOFT" 0,"WONK" 1;
+    background:linear-gradient(180deg,var(--ink) 60%,rgba(24,20,16,.5));
+    -webkit-background-clip:text;background-clip:text;color:transparent;}
+  .bignum .caption{font-size:13px;color:var(--ink-2);margin-top:-4px}
+  .bignum::after{content:"";position:absolute;right:0;bottom:14px;
+    width:60%;border-bottom:1px solid var(--rule)}
+
+  /* ============ KPI STRIP ============ */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);
+    border-bottom:1px solid var(--rule);}
+  .kpi{padding:22px 22px 20px;border-left:1px solid var(--rule);position:relative}
+  .kpi:first-child{border-left:none;padding-left:0}
+  .kpi .lab{font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink-2)}
+  .kpi .val{font-family:"Fraunces",serif;font-weight:500;font-size:54px;
+    line-height:1;letter-spacing:-.02em;margin-top:6px}
+  .kpi .delta{font-family:"JetBrains Mono",monospace;font-size:11px;
+    color:var(--moss);margin-top:8px;letter-spacing:.06em}
+  .kpi .delta.down{color:var(--crimson)}
+
+  /* ============ MAIN GRID ============ */
+  .main{display:grid;grid-template-columns:7fr 5fr;gap:48px;padding-top:36px}
+  @media (max-width:980px){
+    .hero,.kpis,.main{grid-template-columns:1fr}
+    .kpi{border-left:none;border-top:1px solid var(--rule);padding-left:0}
+    .kpi:first-child{border-top:none}
+  }
+
+  .section-h{display:flex;justify-content:space-between;align-items:baseline;
+    border-bottom:2px solid var(--ink);padding-bottom:6px;margin-bottom:18px}
+  .section-h h2{font-family:"Fraunces",serif;font-weight:700;font-size:22px;
+    margin:0;letter-spacing:-.01em;text-transform:uppercase;letter-spacing:.04em}
+  .section-h .meta{font-size:10px;letter-spacing:.3em;text-transform:uppercase;color:var(--ink-2)}
+
+  /* ============ ACTIVITY ARTICLES ============ */
+  .stories{column-count:1;column-gap:32px}
+  .story{break-inside:avoid;padding:18px 0;border-bottom:1px solid var(--rule);
+    display:grid;grid-template-columns:88px 1fr;gap:22px;align-items:start}
+  .story:last-child{border-bottom:none}
+  .story .date{font-family:"JetBrains Mono",monospace;font-size:11px;
+    line-height:1.4;color:var(--ink-2);border-right:1px solid var(--rule);
+    padding-right:14px;text-align:right}
+  .story .date .d{display:block;font-size:34px;color:var(--ink);
+    font-family:"Fraunces",serif;font-weight:500;line-height:.9;margin-bottom:4px}
+  .story .body .tag{display:inline-block;font-size:10px;letter-spacing:.24em;
+    text-transform:uppercase;color:var(--paper);background:var(--ink);
+    padding:3px 8px;margin-bottom:8px}
+  .story .body .tag.crimson{background:var(--crimson)}
+  .story .body .tag.ochre{background:var(--ochre)}
+  .story .body .tag.moss{background:var(--moss)}
+  .story h3{font-family:"Fraunces",serif;font-weight:600;font-size:24px;
+    line-height:1.15;margin:0 0 6px;letter-spacing:-.01em}
+  .story p{margin:0;font-size:15.5px;line-height:1.55;color:var(--ink-2)}
+  .story .by{margin-top:8px;font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-2)}
+  .story .by .name{color:var(--ink);font-weight:600}
+  .story .conf{display:inline-block;margin-left:10px;font-family:"JetBrains Mono",monospace;
+    font-size:10px;color:var(--moss)}
+
+  /* ============ SIDEBAR ============ */
+  .panel{margin-bottom:36px}
+  .panel .row{display:grid;grid-template-columns:1fr 60px;
+    align-items:center;padding:10px 0;border-bottom:1px dotted var(--rule);
+    font-size:14px}
+  .panel .row:last-child{border-bottom:none}
+  .panel .row .nm{display:flex;align-items:center;gap:10px}
+  .panel .row .swatch{width:8px;height:18px;background:var(--ink)}
+  .panel .row .swatch.c{background:var(--crimson)}
+  .panel .row .swatch.o{background:var(--ochre)}
+  .panel .row .swatch.m{background:var(--moss)}
+  .panel .row .ct{font-family:"Fraunces",serif;font-weight:600;font-size:22px;
+    text-align:right;letter-spacing:-.01em}
+
+  .bar{height:6px;background:var(--paper-2);position:relative;margin-top:6px;border:1px solid var(--rule)}
+  .bar > i{position:absolute;left:0;top:0;bottom:0;background:var(--ink);display:block}
+  .bar.c > i{background:var(--crimson)}
+  .bar.o > i{background:var(--ochre)}
+  .bar.m > i{background:var(--moss)}
+
+  /* ============ TICKER ============ */
+  .ticker{margin-top:48px;border-top:3px double var(--ink);
+    border-bottom:3px double var(--ink);overflow:hidden;background:var(--paper-2)}
+  .ticker .track{display:flex;gap:48px;padding:14px 0;
+    animation:scroll 50s linear infinite;white-space:nowrap;width:max-content}
+  .ticker span{font-family:"JetBrains Mono",monospace;font-size:13px;letter-spacing:.06em}
+  .ticker em{color:var(--crimson);font-style:normal;margin:0 6px}
+  @keyframes scroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+  /* ============ COLOPHON ============ */
+  .colophon{margin-top:42px;display:grid;grid-template-columns:repeat(3,1fr);
+    gap:24px;font-size:11px;color:var(--ink-2);
+    border-top:1px solid var(--rule);padding-top:18px}
+  .colophon h4{font-family:"Fraunces",serif;font-size:13px;margin:0 0 6px;
+    text-transform:uppercase;letter-spacing:.18em;color:var(--ink)}
+  .colophon code{font-family:"JetBrains Mono",monospace;background:var(--paper-2);
+    padding:1px 6px;border:1px solid var(--rule);font-size:10px}
+
+  .reveal{opacity:0;transform:translateY(8px);animation:rise .9s cubic-bezier(.2,.7,.2,1) forwards}
+  @keyframes rise{to{opacity:1;transform:translateY(0)}}
+  .d1{animation-delay:.05s}.d2{animation-delay:.15s}.d3{animation-delay:.25s}
+  .d4{animation-delay:.35s}.d5{animation-delay:.45s}.d6{animation-delay:.55s}
+
+  .err{padding:24px;border:2px solid var(--crimson);background:#fff;color:var(--crimson);
+    font-family:"JetBrains Mono",monospace;font-size:13px;margin:24px 0}
+</style>
+</head>
+<body>
+<div class="frame">
+
+  <!-- MASTHEAD -->
+  <header class="masthead reveal d1">
+    <div class="left mono">
+      <div>VOL. I · ISSUE <span id="issueNo">001</span></div>
+      <div>Published from /Users/xiaoli</div>
+      <div style="margin-top:6px">天气：晴 · 风险：可控</div>
+    </div>
+    <div class="title">
+      <h1 class="display">Market</h1>
+      <div class="sub">Daily Intelligence · Sales & Solution Bulletin</div>
+    </div>
+    <div class="right mono">
+      <div id="todayFull">— · —</div>
+      <div>Edition: Local Preview</div>
+      <div style="margin-top:8px"><span class="stamp crimson">DEEPSEEK INSIDE</span></div>
+    </div>
+  </header>
+
+  <!-- RIBBON -->
+  <div class="ribbon mono">
+    <div class="live">LIVE FROM SQLITE · localhost:8000</div>
+    <div class="center">— FIT TO PRINT, FIT TO PUSH —</div>
+    <div>NO. <span id="copyNo">000</span> / FREE FOR INTERNAL USE</div>
+  </div>
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="reveal d2">
+      <div class="kicker">头版 · TODAY'S READ</div>
+      <h2 class="headline display">
+        销售一线<br/>
+        <em>正在</em>发生<br/>
+        什么？
+      </h2>
+      <p class="dek">
+        本期汇总来自钉钉机器人日报的全部活动记录，由
+        <strong style="color:var(--ink)">DeepSeek</strong>
+        驱动的解析管线已就位。下面是当前数据库（SQLite 本地预览模式）中
+        最真实、最未经修饰的销售与解决方案动作切片。
+      </p>
+      <div class="byline">编辑部 · <strong>营销智能管理平台</strong> · 由 FastAPI 直送</div>
+    </div>
+    <div class="bignum reveal d3">
+      <div class="label">Total Activities</div>
+      <div class="value" id="totalActs">—</div>
+      <div class="caption mono">条结构化销售动作 · last refresh <span id="refreshT">—</span></div>
+    </div>
+  </section>
+
+  <!-- KPI STRIP -->
+  <section class="kpis reveal d4">
+    <div class="kpi"><div class="lab">Active Staff</div><div class="val" id="kpiStaff">—</div><div class="delta mono">▲ 在岗销售/解决方案</div></div>
+    <div class="kpi"><div class="lab">Opportunities</div><div class="val" id="kpiOpp">—</div><div class="delta mono">▲ 已识别商机数</div></div>
+    <div class="kpi"><div class="lab">Activity Types</div><div class="val" id="kpiTypes">—</div><div class="delta mono">▲ 行为类型覆盖</div></div>
+    <div class="kpi"><div class="lab">Departments</div><div class="val" id="kpiDept">—</div><div class="delta mono">▲ 协作组数量</div></div>
+  </section>
+
+  <!-- MAIN -->
+  <main class="main">
+
+    <!-- LEFT: STORIES -->
+    <section class="reveal d5">
+      <div class="section-h">
+        <h2>Field Dispatches</h2>
+        <div class="meta">来自一线 · 按时间倒序</div>
+      </div>
+      <div id="stories" class="stories">
+        <div class="mono" style="color:var(--ink-2)">Loading dispatches…</div>
+      </div>
+    </section>
+
+    <!-- RIGHT: SIDEBAR -->
+    <aside class="reveal d6">
+
+      <div class="panel">
+        <div class="section-h"><h2>By Department</h2><div class="meta">部门分布</div></div>
+        <div id="byDept"></div>
+      </div>
+
+      <div class="panel">
+        <div class="section-h"><h2>By Action</h2><div class="meta">行为占比</div></div>
+        <div id="byType"></div>
+      </div>
+
+      <div class="panel">
+        <div class="section-h"><h2>Roster</h2><div class="meta">值班销售</div></div>
+        <div id="roster"></div>
+      </div>
+
+    </aside>
+  </main>
+
+  <!-- TICKER -->
+  <div class="ticker reveal d6">
+    <div class="track" id="ticker"></div>
+  </div>
+
+  <!-- COLOPHON -->
+  <footer class="colophon">
+    <div>
+      <h4>Stack</h4>
+      FastAPI · SQLAlchemy 2 · SQLite · DeepSeek API · UmiJS（生产前端，需 Node 启动）
+    </div>
+    <div>
+      <h4>Endpoints</h4>
+      <code>GET /api/health</code> ·
+      <code>GET /api/activities</code> ·
+      <code>GET /api/activities/dashboard</code> ·
+      <code>GET /api/staff</code>
+    </div>
+    <div>
+      <h4>Set Sail</h4>
+      正式前端启动：安装 Node.js 18+ →
+      <code>cd market/frontend && npm install && npm run dev</code>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+  const API = "/api";
+  const fmt = n => (n ?? 0).toLocaleString("zh-CN");
+  const pad = n => String(n).padStart(2,"0");
+
+  const dateZh = (d) => {
+    const dt = new Date(d);
+    const w = ["日","一","二","三","四","五","六"][dt.getDay()];
+    return `${dt.getFullYear()}年${dt.getMonth()+1}月${dt.getDate()}日 · 星期${w}`;
+  };
+
+  const TYPE_ACCENT = {
+    "拜访客户":"crimson","方案撰写":"ochre","商机跟进":"moss",
+    "招投标":"crimson","渠道拓展":"ochre","回款跟进":"moss","项目推进":"ochre"
+  };
+
+  async function jget(p){
+    const r = await fetch(API+p);
+    if(!r.ok) throw new Error(p+" "+r.status);
+    return r.json();
+  }
+
+  function renderHeader(){
+    const now = new Date();
+    document.getElementById("todayFull").textContent = dateZh(now);
+    document.getElementById("issueNo").textContent =
+      String(now.getDate()*7 + now.getMonth()*31).padStart(3,"0");
+    document.getElementById("copyNo").textContent =
+      String(Math.floor(Math.random()*900+100));
+    document.getElementById("refreshT").textContent =
+      `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  }
+
+  function renderHero(d){
+    document.getElementById("totalActs").textContent = fmt(d.total_activities);
+    document.getElementById("kpiStaff").textContent = fmt(d.active_staff_count);
+    document.getElementById("kpiOpp").textContent   = fmt(d.opportunity_count);
+    document.getElementById("kpiTypes").textContent = Object.keys(d.by_type||{}).length;
+    document.getElementById("kpiDept").textContent  = Object.keys(d.by_department||{}).length;
+  }
+
+  function renderBars(elId, obj, klassRotation){
+    const el = document.getElementById(elId);
+    if(!el) return;
+    const entries = Object.entries(obj||{}).sort((a,b)=>b[1]-a[1]);
+    if(!entries.length){ el.innerHTML = '<div class="mono" style="color:var(--ink-2)">— 暂无数据 —</div>'; return; }
+    const max = entries[0][1] || 1;
+    el.innerHTML = entries.map((e,i)=>{
+      const k = klassRotation[i % klassRotation.length];
+      const pct = Math.round(e[1]/max*100);
+      return `
+        <div class="row">
+          <div class="nm"><span class="swatch ${k}"></span>${e[0]}</div>
+          <div class="ct">${fmt(e[1])}</div>
+        </div>
+        <div class="bar ${k}"><i style="width:${pct}%"></i></div>
+      `;
+    }).join("");
+  }
+
+  function renderRoster(staffList, dash){
+    const counts = {};
+    (dash.by_staff||[]).forEach(s => counts[s.name] = s.count);
+    const el = document.getElementById("roster");
+    el.innerHTML = staffList.map((s,i)=>{
+      const k = ["","c","o","m"][i % 4];
+      return `
+        <div class="row">
+          <div class="nm">
+            <span class="swatch ${k}"></span>
+            <span><strong>${s.name}</strong>
+            <span class="mono" style="font-size:11px;color:var(--ink-2);margin-left:6px">
+              ${s.role} · ${s.department}</span></span>
+          </div>
+          <div class="ct">${fmt(counts[s.name]||0)}</div>
+        </div>`;
+    }).join("");
+  }
+
+  function renderStories(items, staffMap){
+    const el = document.getElementById("stories");
+    if(!items.length){
+      el.innerHTML = '<div class="mono" style="color:var(--ink-2)">No dispatches yet — run seed_demo.py to populate.</div>';
+      return;
+    }
+    el.innerHTML = items.map(a=>{
+      const dt = new Date(a.report_date);
+      const name = a.staff_name || a.user_name || "—";
+      const dep  = a.department || a.user_department || "";
+      const tag  = a.activity_type || a.action_type || "";
+      const klass= TYPE_ACCENT[tag] || "";
+      const conf = (a.confidence!=null) ? `${Math.round(a.confidence*100)}%` : "—";
+      return `
+        <article class="story">
+          <div class="date mono">
+            <span class="d">${pad(dt.getDate())}</span>
+            ${dt.getFullYear()}.${pad(dt.getMonth()+1)}
+          </div>
+          <div class="body">
+            <span class="tag ${klass}">${tag}</span>
+            <h3>${a.target || a.opportunity || "未署名机会"}</h3>
+            <p>${a.description || a.summary || ""}</p>
+            <div class="by">
+              报道：<span class="name">${name}</span>${dep?` · ${dep}`:""}
+              <span class="conf">置信度 ${conf}</span>
+            </div>
+          </div>
+        </article>`;
+    }).join("");
+  }
+
+  function renderTicker(items){
+    const fragments = items.slice(0,18).map(a=>{
+      const tag = a.activity_type || a.action_type;
+      const tgt = a.target || a.opportunity || "—";
+      return `<span>▦ ${tag} <em>·</em> ${tgt} <em>·</em> ${a.staff_name||a.user_name||""}</span>`;
+    });
+    if(!fragments.length) fragments.push('<span>▦ no signal yet</span>');
+    const t = document.getElementById("ticker");
+    t.innerHTML = fragments.concat(fragments).join(""); // double for seamless loop
+  }
+
+  function showError(e){
+    const el = document.getElementById("stories");
+    el.innerHTML = `<div class="err">数据获取失败：${e.message}<br/>请确认后端 (uvicorn) 已在 8000 端口运行。</div>`;
+  }
+
+  async function boot(){
+    renderHeader();
+    try{
+      const [dash, staff, list] = await Promise.all([
+        jget("/activities/dashboard"),
+        jget("/staff"),
+        jget("/activities?limit=20")
+      ]);
+      renderHero(dash);
+      renderBars("byDept", dash.by_department, ["", "c","o","m"]);
+      renderBars("byType", dash.by_type,       ["c","o","m",""]);
+      renderRoster(staff, dash);
+      const items = (list && list.items) ? list.items : (Array.isArray(list)? list : []);
+      const sorted = items.slice().sort((a,b)=> (b.report_date||"").localeCompare(a.report_date||""));
+      renderStories(sorted, staff);
+      renderTicker(sorted);
+    }catch(e){ showError(e); }
+  }
+
+  boot();
+  setInterval(()=>document.getElementById("refreshT") && (
+    document.getElementById("refreshT").textContent =
+      new Date().toTimeString().slice(0,8)
+  ), 1000);
+</script>
+</body>
+</html>

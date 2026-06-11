@@ -1,0 +1,309 @@
+.dash {
+  position: relative;
+}
+
+/* —— 头版 —— */
+.dash-headline {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 8px 0 18px 0;
+}
+
+.dash-title {
+  margin: 6px 0 4px 0 !important;
+  font-family: var(--serif) !important;
+  font-weight: 900 !important;
+  font-size: 56px !important;
+  line-height: 1.05 !important;
+  letter-spacing: 0.02em;
+  color: var(--ink) !important;
+}
+.dash-title .accent {
+  position: relative;
+  display: inline-block;
+  margin: 0 6px;
+  color: var(--vermilion);
+}
+.dash-title .accent::after {
+  content: '';
+  position: absolute;
+  bottom: 4px;
+  left: 0;
+  right: 0;
+  height: 8px;
+  background: rgba(197, 58, 44, 0.18);
+  z-index: -1;
+}
+
+.dash-sub {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-faint);
+  letter-spacing: 0.06em;
+}
+
+.dash-issue {
+  text-align: right;
+}
+.dash-issue-no {
+  font-family: var(--display);
+  font-size: 38px;
+  color: var(--vermilion);
+  line-height: 1;
+}
+
+/* —— 筛选 —— */
+.dash-filters {
+  padding: 18px 0;
+  border-bottom: 1px dashed rgba(26, 23, 20, 0.2);
+}
+.dash-filters .ant-picker,
+.dash-filters .ant-select-selector,
+.dash-filters .ant-input-affix-wrapper,
+.dash-filters .ant-input {
+  border-radius: 0 !important;
+  border-color: var(--ink) !important;
+  background: var(--paper-light) !important;
+}
+.dash-reload {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 4px 10px;
+  border: 1px solid var(--ink);
+  background: var(--paper-light);
+  letter-spacing: 0.1em;
+}
+.dash-reload:hover {
+  background: var(--ink);
+  color: var(--paper-light);
+}
+
+/* —— 统计 —— */
+.dash-stats {
+  margin-top: 24px !important;
+}
+
+.dash-stat {
+  padding: 18px 22px 22px 22px;
+  background: var(--paper-light);
+  min-height: 130px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+.dash-stat.is-highlight {
+  background: var(--ink);
+  color: var(--paper-light);
+}
+.dash-stat.is-highlight .edl-stat-label {
+  color: rgba(245, 239, 227, 0.7);
+}
+.dash-stat.is-highlight .edl-stat-num {
+  color: var(--paper-light);
+}
+.dash-stat.is-highlight::before,
+.dash-stat.is-highlight::after {
+  border-color: var(--vermilion);
+}
+.dash-stat-value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-top: 8px;
+}
+.dash-stat-unit {
+  font-family: var(--serif);
+  font-size: 14px;
+  color: var(--ink-faint);
+}
+.dash-stat.is-highlight .dash-stat-unit {
+  color: rgba(245, 239, 227, 0.7);
+}
+
+/* —— 行为分布 —— */
+.dash-distribution {
+  height: 100%;
+  padding: 20px 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dash-distribution-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+}
+.dash-distribution-total {
+  text-align: right;
+}
+.dash-distribution-total .edl-display {
+  font-size: 32px;
+  line-height: 1;
+  margin-right: 6px;
+}
+.dash-distribution-list {
+  margin-top: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.dist-row {
+  display: grid;
+  grid-template-columns: 96px 1fr 32px;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+}
+.dist-label {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 13px;
+}
+.dist-bar-wrap {
+  background: rgba(26, 23, 20, 0.06);
+  height: 10px;
+  position: relative;
+}
+.dist-bar {
+  height: 100%;
+  transition: width 0.6s cubic-bezier(0.2, 0.65, 0.3, 1);
+}
+.dist-count {
+  text-align: right;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+/* —— Feed 标题 —— */
+.dash-feed {
+  margin-top: 32px;
+  padding-top: 28px;
+  border-top: 1.5px solid var(--ink);
+}
+.dash-feed-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+.dash-feed-title {
+  margin: 4px 0 0 0;
+  font-family: var(--serif);
+  font-weight: 900;
+  font-size: 28px;
+  color: var(--ink);
+}
+.dash-feed-head .ant-tabs-nav::before {
+  border-bottom: 1px solid rgba(26, 23, 20, 0.2) !important;
+}
+.dash-feed-head .ant-tabs-tab {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  padding: 6px 16px !important;
+}
+.dash-feed-head .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: var(--vermilion) !important;
+}
+.dash-feed-head .ant-tabs-ink-bar {
+  background: var(--vermilion) !important;
+  height: 2px !important;
+}
+
+/* —— 单元格 —— */
+.cell-date {
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+/* —— 分组卡片 —— */
+.dash-groups {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 18px;
+}
+@media (max-width: 1100px) {
+  .dash-groups {
+    grid-template-columns: 1fr;
+  }
+}
+.dash-group {
+  background: var(--paper-light) !important;
+  border: 1px solid rgba(26, 23, 20, 0.18) !important;
+  border-radius: 0 !important;
+}
+.dash-group .ant-card-body {
+  padding: 18px 22px !important;
+}
+.dash-group-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  border-bottom: 1px dashed rgba(26, 23, 20, 0.2);
+  padding-bottom: 8px;
+  margin-bottom: 10px;
+}
+.dash-group-meta {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.dash-group-num {
+  font-size: 32px;
+  color: var(--vermilion);
+  line-height: 1;
+}
+.dash-group-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.dash-group-list li {
+  display: grid;
+  grid-template-columns: 96px 1fr 60px;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-bottom: 1px dotted rgba(26, 23, 20, 0.12);
+  font-family: var(--serif);
+  font-size: 13px;
+}
+.dash-group-list li:last-child {
+  border-bottom: 0;
+}
+.dash-group-summary {
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dash-group-date {
+  text-align: right;
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.dash-group-more {
+  display: block !important;
+  text-align: center;
+  font-family: var(--mono) !important;
+  font-size: 11px !important;
+  color: var(--ink-faint) !important;
+  letter-spacing: 0.18em;
+}
+
+@media (max-width: 768px) {
+  .dash-title {
+    font-size: 36px !important;
+  }
+  .dash-headline {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+}

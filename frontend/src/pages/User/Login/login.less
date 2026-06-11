@@ -1,0 +1,295 @@
+.login-page {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 1.15fr 1fr;
+  background: var(--paper);
+  position: relative;
+  z-index: 1;
+}
+
+/* —— 左：刊头大字 —— */
+.login-left {
+  position: relative;
+  padding: 64px 56px 48px 56px;
+  background:
+    linear-gradient(180deg, var(--paper-deep) 0%, var(--paper) 60%);
+  border-right: 1.5px solid var(--ink);
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.login-left::before {
+  content: '';
+  position: absolute;
+  top: 56px;
+  right: 56px;
+  width: 110px;
+  height: 110px;
+  background: var(--vermilion);
+  z-index: 0;
+  transform: rotate(8deg);
+  box-shadow: -4px 4px 0 var(--ink);
+}
+.login-left::after {
+  content: 'DAILY';
+  position: absolute;
+  top: 92px;
+  right: 70px;
+  font-family: var(--display);
+  font-size: 28px;
+  color: var(--paper);
+  z-index: 1;
+  transform: rotate(8deg);
+  letter-spacing: 0.04em;
+}
+
+.login-stamp {
+  position: absolute;
+  top: 220px;
+  right: 56px;
+  border: 2px solid var(--vermilion);
+  color: var(--vermilion);
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  padding: 4px 10px;
+  transform: rotate(-3deg);
+}
+
+.login-eyebrow {
+  position: relative;
+  z-index: 2;
+}
+
+.login-title {
+  position: relative;
+  z-index: 2;
+  margin: 16px 0 28px 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 0.98;
+}
+.login-title .zh {
+  font-family: var(--serif);
+  font-weight: 900;
+  font-size: 92px;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.login-title .zh + .zh {
+  margin-top: -6px;
+  margin-left: 32px;
+  color: var(--vermilion);
+}
+.login-title .en {
+  margin-top: 18px;
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 22px;
+  color: var(--ink-soft);
+}
+
+.login-quote {
+  position: relative;
+  z-index: 2;
+  margin: 24px 0 32px 0;
+  padding: 18px 22px;
+  border-left: 3px solid var(--ink);
+  background: var(--paper-light);
+  max-width: 460px;
+}
+.login-quote blockquote {
+  margin: 0;
+  font-family: var(--serif);
+  font-size: 20px;
+  line-height: 1.5;
+  color: var(--ink);
+}
+.login-quote cite {
+  display: block;
+  margin-top: 8px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-style: normal;
+  letter-spacing: 0.18em;
+  color: var(--ink-faint);
+  text-transform: uppercase;
+}
+
+.login-features {
+  position: relative;
+  z-index: 2;
+  margin-top: auto;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px;
+  padding-top: 18px;
+  border-top: 1px solid rgba(26, 23, 20, 0.18);
+}
+.login-feature {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+.feat-num {
+  font-family: var(--display);
+  font-size: 28px;
+  color: var(--vermilion);
+  line-height: 1;
+}
+.feat-zh {
+  font-family: var(--serif);
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--ink);
+  margin-bottom: 2px;
+}
+
+.login-decor-cn {
+  position: absolute;
+  bottom: -36px;
+  left: -8px;
+  font-family: var(--serif);
+  font-weight: 900;
+  font-size: 220px;
+  letter-spacing: 0.04em;
+  color: rgba(26, 23, 20, 0.04);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* —— 右：表单 —— */
+.login-right {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px;
+  position: relative;
+}
+.login-right::before {
+  content: '';
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  width: 36px;
+  height: 36px;
+  border-top: 2px solid var(--ink);
+  border-right: 2px solid var(--ink);
+}
+.login-right::after {
+  content: '';
+  position: absolute;
+  bottom: 24px;
+  left: 24px;
+  width: 36px;
+  height: 36px;
+  border-bottom: 2px solid var(--ink);
+  border-left: 2px solid var(--ink);
+}
+
+.login-form-wrap {
+  width: 100%;
+  max-width: 380px;
+}
+
+.login-form-title {
+  margin: 6px 0 32px 0;
+  font-family: var(--serif);
+  font-weight: 900;
+  font-size: 44px;
+  color: var(--ink);
+}
+.login-form-title .seal {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 12px;
+  background: var(--vermilion);
+  color: var(--paper);
+  transform: rotate(-2deg);
+}
+
+.form-label {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.login-form-wrap .ant-input,
+.login-form-wrap .ant-input-affix-wrapper {
+  background: transparent !important;
+  border: 0 !important;
+  border-bottom: 1.5px solid var(--ink) !important;
+  border-radius: 0 !important;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+  font-family: var(--serif);
+  font-size: 16px;
+  box-shadow: none !important;
+}
+.login-form-wrap .ant-input-affix-wrapper > input.ant-input {
+  border: 0 !important;
+  font-size: 16px;
+}
+.login-form-wrap .ant-input::placeholder {
+  color: rgba(26, 23, 20, 0.35);
+}
+
+.login-btn {
+  height: 48px;
+  border-radius: 0 !important;
+  background: var(--ink) !important;
+  border: 0 !important;
+  font-family: var(--mono);
+  font-size: 13px;
+  letter-spacing: 0.32em;
+  font-weight: 500;
+  transition: all 0.18s ease;
+}
+.login-btn:hover {
+  background: var(--vermilion) !important;
+}
+.login-btn .arr {
+  font-family: var(--display);
+  font-size: 18px;
+  letter-spacing: 0;
+}
+
+.login-foot {
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(26, 23, 20, 0.18);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.login-foot-build {
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+
+@media (max-width: 960px) {
+  .login-page {
+    grid-template-columns: 1fr;
+  }
+  .login-left {
+    border-right: 0;
+    border-bottom: 1.5px solid var(--ink);
+    padding: 32px 24px;
+  }
+  .login-title .zh {
+    font-size: 56px;
+  }
+  .login-title .zh + .zh {
+    margin-left: 16px;
+  }
+  .login-decor-cn {
+    display: none;
+  }
+  .login-features {
+    grid-template-columns: 1fr;
+  }
+}

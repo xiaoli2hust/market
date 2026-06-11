@@ -1,0 +1,157 @@
+.edl-shell {
+  position: relative;
+  z-index: 1;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.edl-masthead {
+  padding: 28px 56px 0 56px;
+  background: transparent;
+}
+
+.edl-masthead-inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  margin-bottom: 18px;
+}
+
+.edl-masthead-left {
+  flex: 1;
+}
+
+.edl-masthead-title {
+  margin: 6px 0 0 0;
+  display: flex;
+  align-items: baseline;
+  gap: 18px;
+}
+
+.edl-masthead-zh {
+  font-family: var(--serif);
+  font-weight: 900;
+  font-size: 38px;
+  letter-spacing: 0.04em;
+  color: var(--ink);
+  line-height: 1;
+}
+
+.edl-masthead-en {
+  font-family: var(--display);
+  font-style: italic;
+  font-size: 18px;
+  color: var(--vermilion);
+  letter-spacing: 0.02em;
+}
+
+.edl-masthead-right {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.edl-masthead-meta {
+  text-align: right;
+}
+
+.edl-masthead-date {
+  font-family: var(--display);
+  font-size: 22px;
+  color: var(--ink);
+  margin-top: 4px;
+}
+
+.edl-user {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border: 1px solid var(--ink);
+  cursor: pointer;
+  transition: all 0.18s ease;
+  background: var(--paper-light);
+}
+.edl-user:hover {
+  background: var(--ink);
+  color: var(--paper-light);
+}
+.edl-user:hover .edl-user-name {
+  color: var(--paper-light);
+}
+.edl-user-name {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+}
+
+.edl-subnav {
+  display: flex;
+  gap: 0;
+  padding: 12px 0;
+}
+
+.edl-nav-item {
+  font-family: var(--mono);
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  padding: 6px 18px 6px 0;
+  margin-right: 18px;
+  cursor: pointer;
+  border: 0;
+  background: transparent;
+  position: relative;
+  transition: color 0.18s ease;
+}
+.edl-nav-item:hover {
+  color: var(--vermilion);
+}
+.edl-nav-item.is-active {
+  color: var(--vermilion);
+}
+.edl-nav-item.is-active::after {
+  content: '●';
+  margin-left: 6px;
+  font-size: 8px;
+}
+.edl-nav-item.is-disabled {
+  color: rgba(26, 23, 20, 0.35);
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.edl-main {
+  flex: 1;
+  padding: 28px 56px 40px 56px;
+  position: relative;
+}
+
+.edl-foot {
+  padding: 18px 56px 28px 56px;
+}
+.edl-foot-inner {
+  display: flex;
+  justify-content: space-between;
+  padding-top: 12px;
+}
+
+@media (max-width: 1024px) {
+  .edl-masthead {
+    padding: 20px 24px 0 24px;
+  }
+  .edl-main {
+    padding: 20px 24px 32px 24px;
+  }
+  .edl-foot {
+    padding: 18px 24px 20px 24px;
+  }
+  .edl-masthead-zh {
+    font-size: 28px;
+  }
+  .edl-masthead-en {
+    display: none;
+  }
+}
