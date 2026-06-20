@@ -1,4 +1,4 @@
-# 营销智能管理平台 · 前端
+# 营销数据驾驶舱 · 前端
 
 基于 **@umijs/max + React 18 + TypeScript + Ant Design 5 + ProComponents**。
 
@@ -21,7 +21,7 @@ npm run dev   # 默认 http://localhost:3000
 | 路径 | 说明 |
 | --- | --- |
 | `/user/login` | 登录页 |
-| `/dashboard` | 日报看板（主页） |
+| `/dashboard` | 日报周报（主页） |
 
 ## 核心模块
 

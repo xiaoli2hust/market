@@ -4,6 +4,7 @@
 - POST /generate  → 生成日报/周报（需 JWT 认证）
 - GET /           → 报告列表（需 JWT 认证）
 - GET /{id}       → 报告详情（需 JWT 认证）
+- POST /{id}/push → 推送报告到钉钉（需 JWT 认证）
 - GET /r/{token}  → 公开分享链接（无需认证，直接返回 HTML）
 """
 
@@ -48,6 +49,7 @@ def _report_summary(report: ReportPage) -> dict[str, Any]:
         "report_date": report.report_date.isoformat() if report.report_date else None,
         "share_url": _share_url(report),
         "push_status": report.push_status,
+        "note": report.note,
         "created_at": report.created_at.isoformat() if report.created_at else None,
     }
 
@@ -84,10 +86,11 @@ async def generate_report(
         )
 
     try:
+        note = payload.get("note", "").strip() or None
         if report_type == "daily":
-            report = await generate_daily_report(db, target_date)
+            report = await generate_daily_report(db, target_date, note=note)
         else:
-            report = await generate_weekly_report(db, target_date)
+            report = await generate_weekly_report(db, target_date, note=note)
     except Exception as exc:
         raise HTTPException(
             status_code=500,
@@ -172,6 +175,65 @@ async def get_report(
         "pushed_at": report.pushed_at.isoformat() if report.pushed_at else None,
         "token_expires_at": report.token_expires_at.isoformat() if report.token_expires_at else None,
         "created_at": report.created_at.isoformat() if report.created_at else None,
+    }
+
+
+# ---------------------------------------------------------------------------
+# 5. 推送报告到钉钉
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{report_id}/push")
+async def push_report_to_dingtalk(
+    report_id: int,
+    payload: dict[str, Any] | None = None,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(get_current_user),
+) -> dict[str, Any]:
+    """推送报告链接到钉钉群。
+
+    发送 Markdown 格式的消息，包含报告摘要和查看链接。
+    可选参数：
+    - base_url: 平台公网地址前缀（如 https://marketing.example.com），
+                用于拼接完整的分享 URL。不传则使用相对路径。
+    """
+    from ..services import dingtalk_service
+
+    stmt = select(ReportPage).where(ReportPage.id == report_id)
+    report = (await db.execute(stmt)).scalar_one_or_none()
+    if report is None:
+        raise HTTPException(status_code=404, detail="report not found")
+
+    share_url = _share_url(report)
+    if not share_url:
+        raise HTTPException(status_code=400, detail="报告缺少分享 token，无法生成链接")
+
+    base_url = (payload or {}).get("base_url", "").strip()
+
+    # 构造 Markdown 消息
+    title, text = dingtalk_service.build_report_markdown(
+        report_title=report.title or "营销报告",
+        report_type=report.report_type,
+        report_date=report.report_date.isoformat() if report.report_date else "",
+        share_url=share_url,
+        note=report.note,
+        base_url=base_url,
+    )
+
+    # 发送
+    result = await dingtalk_service.send_markdown(db, title, text)
+
+    # 更新推送状态
+    if result["success"]:
+        report.push_status = "pushed"
+        report.pushed_at = datetime.now(timezone.utc)
+        await db.flush()
+
+    return {
+        "success": result["success"],
+        "message": result["message"],
+        "push_status": report.push_status,
+        "pushed_at": report.pushed_at.isoformat() if report.pushed_at else None,
     }
 
 

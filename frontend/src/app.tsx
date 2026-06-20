@@ -11,13 +11,8 @@ export async function getInitialState(): Promise<{
   token?: string | null;
 }> {
   const token = getToken();
-  // 清除无效的 dev token（让后端 JWT 生效）
-  if (token && token.startsWith('dev.')) {
-    clearAuth();
-    return { currentUser: null, token: null };
-  }
   return {
-    currentUser: getCurrentUser(),
+    currentUser: token ? getCurrentUser() : null,
     token,
   };
 }
@@ -38,11 +33,8 @@ export function onRouteChange({ location }: { location: { pathname: string } }) 
 export const request: RequestConfig = {
   timeout: 15000,
   errorConfig: {
-    errorThrower: (res: any) => {
-      throw new Error(res?.message || 'Request error');
-    },
     errorHandler: (error: any) => {
-      const status = error?.response?.status;
+      const status = error?.response?.status || error?.status;
       if (status === 401) {
         notification.warning({ message: '登录已失效，请重新登录' });
         clearAuth();
@@ -53,12 +45,21 @@ export const request: RequestConfig = {
     },
   },
   requestInterceptors: [
-    (config: any) => {
+    (url: string, options: any) => {
       const token = getToken();
       if (token) {
-        config.headers = { ...(config.headers || {}), Authorization: `Bearer ${token}` };
+        return {
+          url,
+          options: {
+            ...options,
+            headers: {
+              ...(options?.headers || {}),
+              Authorization: `Bearer ${token}`,
+            },
+          },
+        };
       }
-      return config;
+      return { url, options };
     },
   ],
 };

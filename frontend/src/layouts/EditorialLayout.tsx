@@ -8,7 +8,7 @@ import './editorial-layout.less';
 
 /**
  * EditorialLayout
- * 编辑式商业情报布局：
+ * 编辑式数据驾驶舱布局：
  *  - 左侧"刊头"：刊名 / 期号 / 日期
  *  - 顶部黑色 menu bar（极细字号 + 字距）
  *  - 主内容采用纸张白盒，双栏式留白
@@ -30,10 +30,10 @@ const EditorialLayout: React.FC = () => {
       <header className="edl-masthead">
         <div className="edl-masthead-inner">
           <div className="edl-masthead-left">
-            <div className="edl-eyebrow">营销 · 智能 · 情报</div>
+            <div className="edl-eyebrow">采集 · 洞察 · 驱动</div>
             <h1 className="edl-masthead-title">
-              <span className="edl-masthead-zh">营销智能管理平台</span>
-              <span className="edl-masthead-en">Marketing Intelligence Daily</span>
+              <span className="edl-masthead-zh">营销数据驾驶舱</span>
+              <span className="edl-masthead-en">Marketing Data Cockpit</span>
             </h1>
           </div>
           <div className="edl-masthead-right">
@@ -65,14 +65,17 @@ const EditorialLayout: React.FC = () => {
         <hr className="edl-rule-strong" />
         <div className="edl-subnav">
           <NavItem to="/dashboard" active={location.pathname.startsWith('/dashboard')}>
-            01 · 日报看板
+            01 · 日报周报
           </NavItem>
-          <NavItem to="/reports" active={location.pathname.startsWith('/reports')}>
-            02 · 报告中心
+          <NavItem to="/intelligence" active={location.pathname.startsWith('/intelligence')}>
+            02 · 资讯中心
           </NavItem>
-          <NavItem to="/dashboard" disabled>03 · 商机管线（待开放）</NavItem>
-          <NavItem to="/dashboard" disabled>04 · 情报订阅（待开放）</NavItem>
-          <NavItem to="/dashboard" disabled>05 · 团队画像（待开放）</NavItem>
+          <NavItem to="/opportunities" active={location.pathname.startsWith('/opportunities')}>
+            03 · 商机数据
+          </NavItem>
+          <NavItem to="/management" active={location.pathname.startsWith('/management')}>
+            04 · 管理中心
+          </NavItem>
         </div>
         <hr className="edl-rule" />
       </header>
@@ -84,7 +87,7 @@ const EditorialLayout: React.FC = () => {
       <footer className="edl-foot">
         <hr className="edl-rule" />
         <div className="edl-foot-inner">
-          <span className="edl-eyebrow">© {dayjs().format('YYYY')} Marketing Intelligence Daily</span>
+          <span className="edl-eyebrow">© {dayjs().format('YYYY')} Marketing Data Cockpit</span>
           <span className="edl-eyebrow">编辑部 · 内部限阅</span>
         </div>
       </footer>

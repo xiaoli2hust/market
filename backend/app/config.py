@@ -24,6 +24,10 @@ class Settings(BaseSettings):
     DINGTALK_WEBHOOK_URL: str = ""
     DINGTALK_SECRET: str = ""
 
+    # 剑鱼标讯
+    JIANYU_USERNAME: str = ""
+    JIANYU_PASSWORD: str = ""
+
     # Auth
     JWT_SECRET_KEY: str = "change-me-in-production"
     JWT_ALGORITHM: str = "HS256"
@@ -38,6 +42,8 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://localhost:8000",
+        "http://localhost:8001",
+        "http://localhost:8002",
     ]
 
     model_config = SettingsConfigDict(

@@ -203,6 +203,41 @@ class LoginResponse(APIBaseModel):
     expires_at: datetime | None = None
 
 
+# ---------- Intelligence / Crawler -------------------------------------------
+
+
+class IntelligenceStats(APIBaseModel):
+    """资讯中心各分类统计。"""
+
+    total: int = 0
+    by_category: dict[str, int] = Field(default_factory=dict)
+    today_count: int = 0
+    latest_crawl: dict[str, datetime | None] = Field(default_factory=dict)
+
+
+class CrawlerStatusOut(APIBaseModel):
+    """单个爬虫的运行状态。"""
+
+    name: str
+    category: str
+    label: str
+    total_collected: int = 0
+    last_run_at: datetime | None = None
+    last_run_stats: dict[str, Any] | None = None
+    status: str = "idle"  # idle / running / error
+
+
+class CrawlRunResult(APIBaseModel):
+    """手动触发爬取的返回结果。"""
+
+    crawler_name: str
+    total_found: int = 0
+    new_saved: int = 0
+    duplicates_skipped: int = 0
+    errors: int = 0
+    message: str | None = None
+
+
 __all__ = [
     "APIBaseModel",
     "BaseModel",

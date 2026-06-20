@@ -26,13 +26,13 @@ const Login: React.FC = () => {
     <div className="login-page">
       {/* 左：刊头大字 */}
       <aside className="login-left">
-        <div className="login-eyebrow edl-eyebrow">营销 · 智能 · 情报</div>
+        <div className="login-eyebrow edl-eyebrow">采集 · 洞察 · 驱动</div>
         <div className="login-stamp">№ {dayjs().format('YYYYMMDD')}</div>
 
         <h1 className="login-title">
-          <span className="zh">营销智能</span>
-          <span className="zh">管理平台</span>
-          <span className="en">Marketing Intelligence Daily</span>
+          <span className="zh">营销数据</span>
+          <span className="zh">驾驶舱</span>
+          <span className="en">Marketing Data Cockpit</span>
         </h1>
 
         <div className="login-quote">
@@ -66,7 +66,7 @@ const Login: React.FC = () => {
           </div>
         </div>
 
-        <div className="login-decor-cn">營銷 · 智能 · 情報</div>
+        <div className="login-decor-cn">採集 · 洞察 · 驅動</div>
       </aside>
 
       {/* 右：登录表单 */}

@@ -1,7 +1,7 @@
 import { defineConfig } from '@umijs/max';
 
 export default defineConfig({
-  title: '营销智能管理平台',
+  title: '营销数据驾驶舱',
   npmClient: 'npm',
   hash: true,
   history: { type: 'browser' },
@@ -39,7 +39,15 @@ export default defineConfig({
   mfsu: false,
   proxy: {
     '/api': {
-      target: 'http://localhost:8000',
+      target: 'http://127.0.0.1:8001',
+      changeOrigin: true,
+    },
+    '/r': {
+      target: 'http://127.0.0.1:8001',
+      changeOrigin: true,
+    },
+    '/re': {
+      target: 'http://127.0.0.1:8001',
       changeOrigin: true,
     },
   },
@@ -50,15 +58,17 @@ export default defineConfig({
       path: '/',
       component: '@/layouts/EditorialLayout',
       routes: [
-        { path: '/dashboard', component: './Dashboard', name: '日报看板' },
-        { path: '/reports', component: './Reports', name: '报告中心' },
+        { path: '/dashboard', component: './Dashboard', name: '日报周报' },
+        { path: '/intelligence', component: './Intelligence', name: '资讯中心' },
+        { path: '/opportunities', component: './Opportunities', name: '商机数据' },
+        { path: '/management', component: './Management', name: '管理中心' },
       ],
     },
   ],
   fastRefresh: true,
   esbuildMinifyIIFE: true,
   define: {
-    'process.env.APP_NAME': '营销智能管理平台',
+    'process.env.APP_NAME': '营销数据驾驶舱',
   },
 
 });

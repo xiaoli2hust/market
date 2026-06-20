@@ -191,6 +191,177 @@ class ReportPage(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# 管理中心新增模型
+# ---------------------------------------------------------------------------
+
+
+class CrawlerSource(Base):
+    """爬虫目标站点配置。"""
+
+    __tablename__ = "crawler_sources"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    category: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    base_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    selectors: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true", default=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class KeywordConfig(Base):
+    """关键词配置（按分类存储）。"""
+
+    __tablename__ = "keyword_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    category: Mapped[str] = mapped_column(String(30), nullable=False, unique=True)
+    keywords: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class ScheduleConfig(Base):
+    """爬虫调度配置（单行记录）。"""
+
+    __tablename__ = "schedule_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    crawl_frequency_per_day: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="2", default=2
+    )
+    relevance_threshold: Mapped[float] = mapped_column(
+        Float, nullable=False, server_default="30", default=30.0
+    )
+    auto_crawl_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class LLMConfig(Base):
+    """大模型全局配置。"""
+
+    __tablename__ = "llm_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    model_name: Mapped[str] = mapped_column(String(100), nullable=False, server_default="deepseek-chat")
+    api_base_url: Mapped[str] = mapped_column(
+        String(500), nullable=False, server_default="https://api.deepseek.com"
+    )
+    api_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    default_temperature: Mapped[float] = mapped_column(
+        Float, nullable=False, server_default="0.2", default=0.2
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PromptTemplate(Base):
+    """Prompt 模板（按场景存储）。"""
+
+    __tablename__ = "prompt_templates"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scene: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    template_text: Mapped[str] = mapped_column(Text, nullable=False)
+    temperature: Mapped[float] = mapped_column(
+        Float, nullable=False, server_default="0.2", default=0.2
+    )
+    max_tokens: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="2000", default=2000
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SystemUser(Base):
+    """系统用户（管理员账号）。"""
+
+    __tablename__ = "system_users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(String(50), nullable=False, unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), nullable=False, server_default="viewer")
+    display_name: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true", default=True
+    )
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class OperationLog(Base):
+    """操作日志。"""
+
+    __tablename__ = "operation_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    username: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    action: Mapped[str] = mapped_column(String(50), nullable=False)
+    target: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    detail: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    ip_address: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class APIKeyRecord(Base):
+    """API Key 管理。"""
+
+    __tablename__ = "api_key_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(50), nullable=False)
+    key_value: Mapped[str] = mapped_column(String(255), nullable=False, unique=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="true", default=True
+    )
+    created_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class DingtalkConfig(Base):
+    """钉钉配置。"""
+
+    __tablename__ = "dingtalk_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    webhook_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # 企业内部应用凭证（用于图片上传 / 长图推送）
+    app_key: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    app_secret: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    # 剑鱼标讯账号
+    jianyu_username: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    jianyu_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 __all__ = [
     "Base",
     "Staff",
@@ -199,4 +370,13 @@ __all__ = [
     "CrawlerItem",
     "DailyExpress",
     "ReportPage",
+    "CrawlerSource",
+    "KeywordConfig",
+    "ScheduleConfig",
+    "LLMConfig",
+    "PromptTemplate",
+    "SystemUser",
+    "OperationLog",
+    "APIKeyRecord",
+    "DingtalkConfig",
 ]

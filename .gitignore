@@ -29,3 +29,35 @@ Thumbs.db
 
 # Build
 *.log
+
+# Screenshots / Images (generated)
+backend/*.png
+backend/screenshots/
+*.png
+
+# Cookies (login sessions)
+backend/cookies/
+
+# Auth tokens
+backend/sf_auth_token.txt
+
+# User chat backup (not source code)
+user_chat_memory_backup/
+
+# Data files
+*.xlsx
+*.json
+!frontend/package.json
+!frontend/package-lock.json
+!frontend/tsconfig.json
+
+# Seed / import scripts (one-time use)
+backend/seed_*.py
+backend/import_*.py
+backend/smart_import.py
+backend/start.bat
+frontend/start.bat
+
+# Temporary HTML
+backend/*.html
+backend/app/static/bidding_express_demo.html
