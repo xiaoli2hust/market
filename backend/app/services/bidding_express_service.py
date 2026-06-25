@@ -1,11 +1,12 @@
-"""剑鱼标讯整合服务 v2 — 按行业分组 + 关键词聚合 + 完整信息提取。"""
+"""结构化标讯整合服务 v2 — 按行业分组 + 关键词聚合 + 完整信息提取。"""
 
 from __future__ import annotations
 
 import logging
+import calendar
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -100,10 +101,27 @@ class IndustryGroup:
 class BiddingExpress:
     """整合后的标讯速递。"""
     express_date: str
+    period: str
+    period_label: str
+    period_start: str | None
+    period_end: str | None
     customer_name: str
+    source_total: int
     total: int
     industries: list[IndustryGroup]
     high_value_items: list[BiddingItem]  # 高金额标讯（>100 万）
+
+    @property
+    def priority_items(self) -> list[BiddingItem]:
+        """需要优先关注的标讯。"""
+
+        return [
+            item
+            for industry in self.industries
+            for group in industry.keyword_groups
+            for item in group.items
+            if item.priority_score >= 70
+        ]
 
 
 def _parse_amount(amount_str: str) -> float:
@@ -112,7 +130,7 @@ def _parse_amount(amount_str: str) -> float:
         return 0.0
     try:
         return float(amount_str)
-    except:
+    except (TypeError, ValueError):
         return 0.0
 
 
@@ -224,7 +242,7 @@ def calculate_priority_score(item: BiddingItem) -> int:
 
 
 def fetch_bidding_data(api_key: str) -> tuple[list[dict], str]:
-    """调用剑鱼 API 获取原始数据。"""
+    """调用结构化标讯 API 获取原始数据。"""
     resp = httpx.get(
         _JIANYU_API.format(key=api_key),
         params={"type": "private"},
@@ -238,23 +256,20 @@ def fetch_bidding_data(api_key: str) -> tuple[list[dict], str]:
     return data.get("data", []), data.get("customername", "")
 
 
-def build_express(api_key: str, express_date: str | None = None) -> BiddingExpress:
+def build_express(api_key: str, express_date: str | None = None, period: str = "week") -> BiddingExpress:
     """获取数据并整合成标讯速递。"""
     raw_items, customer_name = fetch_bidding_data(api_key)
 
     if not express_date:
         express_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    anchor_date = _parse_date_value(express_date) or datetime.now(timezone.utc).date()
+    period = _normalize_period(period)
+    period_start, period_end = _period_window(anchor_date, period)
 
-    # 转换为 BiddingItem，过滤 6 月 15-16 日数据
+    # 转换为 BiddingItem。API 侧已经按账号规则返回结构化标讯，这里不再写死日期窗口。
     items: list[BiddingItem] = []
     for raw in raw_items:
         pub_time = raw.get("publishtime", "")
-        # 只保留 6 月 15-16 日数据
-        if not pub_time.startswith("2026-06"):
-            continue
-        day = int(pub_time.split("-")[2]) if pub_time else 0
-        if day < 15 or day > 16:
-            continue
 
         title = raw.get("title", "").strip()
         if not title:
@@ -299,7 +314,8 @@ def build_express(api_key: str, express_date: str | None = None) -> BiddingExpre
                            industry=industry, keyword_group=keyword_group)
             ),
         )
-        items.append(item)
+        if period == "all" or _is_in_period(pub_time, period_start, period_end):
+            items.append(item)
 
     # 按行业分组
     industry_map: dict[str, IndustryGroup] = {}
@@ -331,7 +347,12 @@ def build_express(api_key: str, express_date: str | None = None) -> BiddingExpre
 
     return BiddingExpress(
         express_date=express_date,
+        period=period,
+        period_label=_format_period_label(period_start, period_end, period),
+        period_start=period_start.isoformat() if period_start else None,
+        period_end=period_end.isoformat() if period_end else None,
         customer_name=customer_name,
+        source_total=len(raw_items),
         total=len(items),
         industries=industries,
         high_value_items=high_value,
@@ -364,7 +385,7 @@ def render_html(express: BiddingExpress) -> str:
         <div class="overview-grid">
             <div class="overview-card">
                 <div class="overview-number">{total}</div>
-                <div class="overview-label">本周标讯总数</div>
+                <div class="overview-label">周期标讯总数</div>
             </div>
             <div class="overview-card">
                 <div class="overview-number">{len(express.industries)}</div>
@@ -375,7 +396,7 @@ def render_html(express: BiddingExpress) -> str:
                 <div class="overview-label">关键词分组</div>
             </div>
             <div class="overview-card">
-                <div class="overview-number">6.15-6.16</div>
+                <div class="overview-number">{express.period_label}</div>
                 <div class="overview-label">统计周期</div>
             </div>
         </div>
@@ -754,8 +775,8 @@ def render_html(express: BiddingExpress) -> str:
 <div class="container">
 
 <div class="header">
-  <h1>📋 今日标讯速递</h1>
-  <div class="sub">{express.express_date} · {express.customer_name} · 今日共 {total} 条标讯</div>
+	  <h1>📋 标讯速递</h1>
+	  <div class="sub">{express.express_date} · {express.customer_name} · 本次共 {total} 条标讯</div>
 
   {overview_html}
 </div>
@@ -763,7 +784,7 @@ def render_html(express: BiddingExpress) -> str:
 {industries_html}
 
 <div class="footer">
-  营销数据驾驶舱 · 内部资料请勿外传
+  Market 数据采集中心 · 内部资料请勿外传
 </div>
 
 </div>
@@ -771,3 +792,88 @@ def render_html(express: BiddingExpress) -> str:
 </html>"""
 
     return html
+
+
+def _normalize_period(period: str | None) -> str:
+    value = (period or "week").strip().lower()
+    if value in {"day", "today"}:
+        return "day"
+    if value in {"week", "weekly"}:
+        return "week"
+    if value in {"month", "monthly"}:
+        return "month"
+    if value in {"all", "all_time"}:
+        return "all"
+    return "week"
+
+
+def _period_window(anchor: date, period: str) -> tuple[date | None, date | None]:
+    if period == "day":
+        return anchor, anchor
+    if period == "week":
+        start = anchor - timedelta(days=anchor.weekday())
+        return start, start + timedelta(days=6)
+    if period == "month":
+        _, last_day = calendar.monthrange(anchor.year, anchor.month)
+        return date(anchor.year, anchor.month, 1), date(anchor.year, anchor.month, last_day)
+    return None, None
+
+
+def _is_in_period(value: Any, start: date | None, end: date | None) -> bool:
+    if start is None or end is None:
+        return True
+    pub_date = _parse_date_value(value)
+    if pub_date is None:
+        return False
+    return start <= pub_date <= end
+
+
+def _parse_date_value(value: Any) -> date | None:
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value or "").strip()
+    if not text:
+        return None
+    patterns = [
+        r"(20\d{2})-(\d{1,2})-(\d{1,2})",
+        r"(20\d{2})/(\d{1,2})/(\d{1,2})",
+        r"(20\d{2})\.(\d{1,2})\.(\d{1,2})",
+        r"(20\d{2})年(\d{1,2})月(\d{1,2})日",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if not match:
+            continue
+        try:
+            year, month, day = (int(part) for part in match.groups())
+            return date(year, month, day)
+        except ValueError:
+            return None
+    return None
+
+
+def _format_period_label(start: date | None, end: date | None, period: str) -> str:
+    if period == "all" or not start or not end:
+        return "全部"
+    start_label = start.strftime("%m.%d")
+    end_label = end.strftime("%m.%d")
+    if start == end:
+        return start_label
+    return f"{start_label}-{end_label}"
+
+
+def _period_label(items: list[BiddingItem], fallback: str) -> str:
+    dates = sorted(
+        {
+            item.pub_time[:10]
+            for item in items
+            if item.pub_time and re.match(r"20\d{2}-\d{2}-\d{2}", item.pub_time[:10])
+        }
+    )
+    if not dates:
+        return fallback
+    start = dates[0][5:].replace("-", ".")
+    end = dates[-1][5:].replace("-", ".")
+    return start if start == end else f"{start}-{end}"

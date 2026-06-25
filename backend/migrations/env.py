@@ -41,6 +41,11 @@ def _resolve_sync_url() -> str:
     )
     if not raw:
         raise RuntimeError("DATABASE_URL is not configured for Alembic")
+    if raw.lower().startswith("sqlite"):
+        raise SystemExit(
+            "Alembic migrations are PostgreSQL-only for this project; "
+            "local SQLite uses app startup bootstrap."
+        )
     return (
         raw.replace("postgresql+asyncpg://", "postgresql+psycopg2://")
         .replace("postgres+asyncpg://", "postgresql+psycopg2://")

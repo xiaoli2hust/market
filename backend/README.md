@@ -1,92 +1,69 @@
-# 营销数据驾驶舱 · 后端
+# Market 数据采集中心 · 后端
 
-基于 FastAPI + PostgreSQL + 通义千问 (DashScope OpenAI 兼容) 的后端服务，
-负责钉钉聊天 JSON 接收、营销动作抽取、活动/人员查询，以及钉钉机器人推送等能力。
+FastAPI 后端负责四条主链路：
 
-> 本目录是 Task 1 重写后的项目骨架，仅含可运行的最小结构，业务逻辑由后续任务填充。
+- 日报周报：日报 JSON 接收、LLM 解析、活动查询、报告生成与推送。
+- 市场洞察：标讯、政策、市场、竞对、行业知识采集，证据记录、情报事件和 Agent 周/月分析。
+- 商机中心：标讯线索识别、人工确认、状态流转，后续承接销售侧商机机制。
+- 管理中心：采集源、关键词、调度、LLM、Prompt、用户、API Key、钉钉和结构化标讯配置。
 
-## 目录结构
+## 本地启动
 
-```
-market/backend/
-├── app/
-│   ├── __init__.py
-│   ├── main.py              # FastAPI 入口
-│   ├── config.py            # pydantic-settings 配置
-│   ├── database.py          # 异步引擎 + Session + Base
-│   ├── auth.py              # JWT / bcrypt / 上传 Key 工具
-│   ├── models.py            # ORM 模型（Task 2 填充）
-│   ├── schemas.py           # 通用 Pydantic 基类与占位
-│   ├── routers/             # 路由骨架：auth / import_data / activities / staff
-│   └── services/
-│       └── llm_service.py   # 通义千问客户端封装
-├── migrations/              # Alembic 迁移
-│   ├── env.py
-│   ├── script.py.mako
-│   └── versions/
-├── alembic.ini
-├── requirements.txt
-├── Dockerfile
-└── .env.example
-```
-
-## 本地开发
+默认使用本地 SQLite，适合零配置试用：
 
 ```bash
-cd market/backend
-python -m venv .venv
-source .venv/bin/activate
+cd /Users/xiaoli/Documents/market-product/backend
 pip install -r requirements.txt
-
-cp .env.example .env  # 按需修改
-
-# 启动开发服务（要求本地 PostgreSQL 已就绪，schema=marketing）
-uvicorn app.main:app --reload --port 8000
+python3 -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 ```
 
 启动后访问：
 
-- 健康检查：<http://localhost:8000/api/health>
-- Swagger：<http://localhost:8000/api/docs>
+- 健康检查：<http://127.0.0.1:8001/api/health>
+- Swagger：<http://127.0.0.1:8001/api/docs>
+
+SQLite 模式下应用启动会自动创建缺失表，并补齐必要的本地迁移字段。生产或多人环境请使用 PostgreSQL + Alembic。
 
 ## 数据库迁移
 
-```bash
-# 生成新迁移（基于 app.models 的最新 metadata）
-alembic revision --autogenerate -m "describe change"
+PostgreSQL 部署使用 Alembic：
 
-# 应用迁移
-alembic upgrade head
+```bash
+cd /Users/xiaoli/Documents/market-product/backend
+python3 -m alembic upgrade head
 ```
 
-> Alembic 使用同步 `psycopg2` 驱动，运行时 FastAPI 使用 `asyncpg` 异步驱动；
-> `migrations/env.py` 会自动把 `postgresql+asyncpg://` 重写为 `postgresql+psycopg2://`。
+Alembic 迁移链只面向 PostgreSQL。SQLite 是本地单机试用模式，由应用启动时自动建表和补齐兼容字段。
+
+迁移链当前包含：
+
+- 基础经营表
+- 商机线索表
+- 爬虫运行日志
+- 管理中心运行配置
+- 加密字段长度扩展
+- 报告版本生命周期
+- 情报证据、情报事件、爬虫任务锁和任务运行实例
 
 ## Docker
 
+项目根目录提供 `docker-compose.yml`。先复制根目录 `.env.example` 为 `.env`，填入强密码和随机密钥。后端镜像启动时会先校验生产密钥，再执行：
+
 ```bash
-docker build -t market-backend .
-docker run --rm -p 8000:8000 --env-file .env market-backend
+python3 -m alembic upgrade head
 ```
 
-镜像基于 `mcr.microsoft.com/playwright/python:v1.49.0-noble`，预装 Chromium，
-便于后续在同一镜像中扩展 RPA / 爬虫任务。
+然后启动 FastAPI 服务。Compose 中的数据库密码、`JWT_SECRET_KEY`、`SECRET_ENCRYPTION_KEY`、`ADMIN_PASSWORD` 和 `UPLOAD_API_KEY` 均为必填项，不能使用默认弱口令。
 
-## 环境变量
-
-详见 [.env.example](./.env.example)。关键变量：
+## 关键环境变量
 
 | 变量 | 说明 |
 | --- | --- |
-| `DATABASE_URL` | asyncpg 连接串 |
-| `DATABASE_SCHEMA` | 业务 schema，默认 `marketing` |
-| `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | 通义千问 OpenAI 兼容接口 |
-| `DINGTALK_WEBHOOK_URL` / `DINGTALK_SECRET` | 钉钉机器人推送 |
-| `JWT_*` / `ADMIN_*` | 后台登录鉴权 |
-| `UPLOAD_API_KEY` | 内网 RPA / 爬虫推送鉴权 |
+| `DATABASE_URL` | 默认 SQLite；生产建议 `postgresql+asyncpg://...` |
+| `DATABASE_SCHEMA` | PostgreSQL schema，默认 `marketing` |
+| `JWT_SECRET_KEY` | 登录与公开报告 token 签名密钥 |
+| `SECRET_ENCRYPTION_KEY` | 运行时密钥加密材料，生产必须稳定配置 |
+| `ADMIN_USERNAME` / `ADMIN_PASSWORD` | 初始管理员账号，仅用于首次启动 |
+| `UPLOAD_API_KEY` | 兼容旧导入链路；占位值不会被视为有效 Key |
 
-## 后续任务
-
-- Task 2：补全 `app/models.py` 与初始 Alembic 迁移；
-- Task 3：实现 JSON 导入 + LLM 抽取闭环；
-- Task 4：完善登录/活动/人员业务接口与前端联调。
+LLM、Prompt、钉钉、结构化标讯账号、采集源和关键词属于运行时配置，应优先在管理中心维护。

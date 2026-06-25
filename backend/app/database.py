@@ -46,8 +46,8 @@ def _build_engine_kwargs() -> dict:
     """根据数据库类型组装 ``create_async_engine`` 参数。"""
 
     if _is_sqlite(settings.DATABASE_URL):
-        # SQLite 不需要连接池预检和回收，使用默认 NullPool 行为更稳定。
-        return {"echo": False, "future": True}
+        # 本地采集任务会有较长写入窗口；给 SQLite 足够的锁等待时间。
+        return {"echo": False, "future": True, "connect_args": {"timeout": 30}}
     return {
         "echo": False,
         "pool_pre_ping": True,
@@ -58,6 +58,21 @@ def _build_engine_kwargs() -> dict:
 
 # 异步引擎：根据 DSN 协议自动选择驱动行为。
 engine = create_async_engine(settings.DATABASE_URL, **_build_engine_kwargs())
+
+
+if _is_sqlite(settings.DATABASE_URL):
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragmas(dbapi_connection, connection_record):  # pragma: no cover
+        """Improve local SQLite behavior under crawler read/write bursts."""
+
+        cursor = dbapi_connection.cursor()
+        try:
+            cursor.execute("PRAGMA busy_timeout=30000")
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA synchronous=NORMAL")
+        finally:
+            cursor.close()
 
 
 if _USE_SCHEMA:

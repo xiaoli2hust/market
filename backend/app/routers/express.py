@@ -19,7 +19,7 @@ from fastapi.responses import HTMLResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import get_current_user
+from ..auth import create_express_token, require_permission, verify_express_token
 from ..database import get_db
 from ..models import DailyExpress
 from ..services.express_service import generate_daily_express
@@ -28,11 +28,21 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/express", tags=["express"])
 public_router = APIRouter(tags=["express-public"])
+_PUBLIC_HTML_HEADERS = {
+    "Cache-Control": "no-store",
+    "X-Robots-Tag": "noindex, nofollow",
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "SAMEORIGIN",
+}
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _public_html_response(content: str, status_code: int = 200) -> HTMLResponse:
+    return HTMLResponse(content=content, status_code=status_code, headers=_PUBLIC_HTML_HEADERS)
 
 
 def _express_summary(express: DailyExpress) -> dict[str, Any]:
@@ -58,7 +68,7 @@ def _express_summary(express: DailyExpress) -> dict[str, Any]:
 async def generate_express(
     payload: dict[str, str],
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_permission("reports:generate")),
 ) -> dict[str, Any]:
     """Generate daily express for a given date."""
 
@@ -74,7 +84,8 @@ async def generate_express(
     try:
         express = await generate_daily_express(db, target_date)
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        logger.exception("daily express generation failed: date=%s", target_date)
+        raise HTTPException(status_code=500, detail="日报速递生成失败，请检查日报数据和模型配置后重试") from exc
 
     return {
         "id": express.id,
@@ -90,7 +101,7 @@ async def list_express(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_permission("reports:view")),
 ) -> dict[str, Any]:
     """List all daily expresses, newest first."""
 
@@ -114,7 +125,7 @@ async def list_express(
 async def get_express(
     express_id: int,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_permission("reports:view")),
 ) -> dict[str, Any]:
     """Get express detail with HTML content."""
 
@@ -145,7 +156,7 @@ async def push_express_to_dingtalk(
     express_id: int,
     payload: dict[str, Any] | None = None,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_permission("reports:generate")),
 ) -> dict[str, Any]:
     """推送速递到钉钉群。
 
@@ -193,13 +204,9 @@ async def push_express_to_dingtalk(
     title, text = dingtalk_service.build_express_markdown(
         express_title=express.title or "每日速递",
         sections=express.sections or [],
-        express_id=express.id,
+        share_url=f"/re/{create_express_token(express.id)}",
         base_url=base_url,
     )
-
-    # 附加截图信息
-    if screenshot_path and not screenshot_error:
-        text += f"\n\n> 📸 长图截图已保存: `{screenshot_path}`"
 
     # Step 3: 发送
     result = await dingtalk_service.send_markdown(db, title, text, is_at_all=True)
@@ -241,18 +248,22 @@ _EXPIRED_HTML = """\
 """
 
 
-@public_router.get("/re/{express_id}", include_in_schema=False)
+@public_router.get("/re/{token}", include_in_schema=False)
 async def view_express_public(
-    express_id: int,
+    token: str,
     db: AsyncSession = Depends(get_db),
 ) -> HTMLResponse:
-    """Public view of a daily express by ID."""
+    """Public view of a daily express by short-lived token."""
+
+    express_id = verify_express_token(token)
+    if express_id is None:
+        return _public_html_response(_EXPIRED_HTML, status_code=410)
 
     stmt = select(DailyExpress).where(DailyExpress.id == express_id)
     express = (await db.execute(stmt)).scalar_one_or_none()
 
     if not express:
-        return HTMLResponse(content="<html><body><h2>未找到</h2></body></html>", status_code=404)
+        return _public_html_response("<html><body><h2>未找到</h2></body></html>", status_code=404)
 
     html = express.html_content or "<html><body><p>内容为空</p></body></html>"
-    return HTMLResponse(content=html)
+    return _public_html_response(html)

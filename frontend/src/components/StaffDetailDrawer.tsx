@@ -34,7 +34,7 @@ const StaffDetailDrawer: React.FC<Props> = ({ staffId, onClose }) => {
       closable={false}
       title={null}
       className="staff-drawer"
-      bodyStyle={{ padding: 0 }}
+      styles={{ body: { padding: 0 } }}
     >
       {loading || !data ? (
         <div style={{ padding: 32 }}>

@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth import require_permission
 from ..database import get_db
 from .staff import get_departments, get_staff_detail, list_staff
 
@@ -23,6 +24,7 @@ async def users_list(
     is_active: bool | None = None,
     department: str | None = None,
     db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("dashboard:view")),
 ) -> list[dict[str, Any]]:
     """兼容接口：等价 GET /api/staff/。"""
 
@@ -30,7 +32,10 @@ async def users_list(
 
 
 @router.get("/departments")
-async def users_departments(db: AsyncSession = Depends(get_db)) -> list[str]:
+async def users_departments(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("dashboard:view")),
+) -> list[str]:
     """兼容接口：等价 GET /api/staff/departments。"""
 
     return await get_departments(db=db)
@@ -40,6 +45,7 @@ async def users_departments(db: AsyncSession = Depends(get_db)) -> list[str]:
 async def users_detail(
     user_id: int,
     db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("dashboard:view")),
 ) -> dict[str, Any]:
     """兼容接口：等价 GET /api/staff/{staff_id}。"""
 

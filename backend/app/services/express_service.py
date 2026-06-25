@@ -24,13 +24,13 @@ logger = logging.getLogger(__name__)
 
 _CATEGORY_CONFIG = {
     "bidding": {
-        "label": "标讯信息",
+        "label": "标讯雷达",
         "color": "#C53A2C",
         "icon": "📋",
         "max_items": 10,
     },
     "news": {
-        "label": "市场动态",
+        "label": "市场线索",
         "color": "#1890ff",
         "icon": "🌐",
         "max_items": 8,
@@ -42,7 +42,7 @@ _CATEGORY_CONFIG = {
         "max_items": 8,
     },
     "ai": {
-        "label": "AI资讯",
+        "label": "行业知识",
         "color": "#722ed1",
         "icon": "🤖",
         "max_items": 6,
@@ -271,7 +271,7 @@ def _render_bidding(items: list[dict]) -> str:
 
 def _render_news(items: list[dict]) -> str:
     if not items:
-        return '<div class="empty-section">暂无市场动态</div>'
+        return '<div class="empty-section">暂无市场线索</div>'
 
     html = ""
     for item in items:
@@ -345,7 +345,7 @@ _AI_SUB_LABELS = {
 
 def _render_ai(items: list[dict]) -> str:
     if not items:
-        return '<div class="empty-section">暂无AI资讯</div>'
+        return '<div class="empty-section">暂无行业知识</div>'
 
     html = ""
     for item in items:
@@ -439,7 +439,7 @@ def _render_express_html(
         {sections_html}
     </div>
     <div class="footer">
-        <div class="footer-text">营销数据驾驶舱 · 自动生成</div>
+        <div class="footer-text">Market 数据采集中心 · 自动生成</div>
         <div class="footer-line">内部资料 · 请勿外传</div>
     </div>
 </div>

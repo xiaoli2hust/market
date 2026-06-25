@@ -15,6 +15,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import and_, distinct, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth import require_permission
 from ..database import get_db
 from ..models import Activity, Staff
 
@@ -112,6 +113,7 @@ async def list_activities(
     end_date: str | None = None,
     keyword: str | None = None,
     db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("dashboard:view")),
 ) -> dict[str, Any]:
     """多维度筛选活动记录，支持分页。
 
@@ -186,6 +188,7 @@ async def get_stats(
     start_date: str | None = None,
     end_date: str | None = None,
     db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("dashboard:view")),
 ) -> dict[str, Any]:
     """活动统计聚合：总览 + 维度分布 + 近 7 天趋势。"""
 
@@ -276,6 +279,17 @@ async def get_stats(
         d = seven_days_ago + timedelta(days=offset)
         daily_trend.append({"date": d.isoformat(), "count": trend_map.get(d, 0)})
 
+    recent_stmt = (
+        select(Activity, Staff)
+        .join(Staff, Staff.id == Activity.staff_id, isouter=True)
+        .order_by(Activity.report_date.desc(), Activity.id.desc())
+        .limit(10)
+    )
+    if range_where is not None:
+        recent_stmt = recent_stmt.where(range_where)
+    recent_rows = (await db.execute(recent_stmt)).all()
+    recent_activities = [_activity_to_dict(activity, staff) for activity, staff in recent_rows]
+
     return {
         "total_activities": int(total_activities),
         "today_activities": int(today_activities),
@@ -289,7 +303,7 @@ async def get_stats(
         "department_breakdown": by_department,  # 前端兼容别名
         "by_staff": by_staff,
         "daily_trend": daily_trend,
-        "recent_activities": [],  # 前端兼容（单独查询成本高，返回空数组）
+        "recent_activities": recent_activities,
     }
 
 
@@ -303,6 +317,7 @@ async def dashboard(
     start_date: str | None = None,
     end_date: str | None = None,
     db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("dashboard:view")),
 ) -> dict[str, Any]:
     """统计看板（/stats 的别名，便于前端对接）。"""
 
@@ -315,7 +330,9 @@ async def dashboard(
 
 
 @router.get("/action-types")
-async def get_action_types() -> list[dict[str, str]]:
+async def get_action_types(
+    _user: dict = Depends(require_permission("dashboard:view")),
+) -> list[dict[str, str]]:
     """获取所有行为类型及其中文标签和颜色。"""
 
     return ACTION_TYPES
@@ -332,6 +349,7 @@ async def export_excel(
     end_date: str | None = None,
     staff_id: int | None = None,
     db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("dashboard:export")),
 ) -> StreamingResponse:
     """导出筛选后的活动记录为 Excel（xlsx）。"""
 

@@ -1,45 +1,60 @@
-# 营销数据驾驶舱 · 前端
+# Market 数据采集中心 · 前端
 
-基于 **@umijs/max + React 18 + TypeScript + Ant Design 5 + ProComponents**。
+前端基于 **@umijs/max + React 18 + TypeScript + Ant Design 5 + ProComponents**，提供四个一级模块：
 
-视觉方向（Editorial Business Intelligence）：
-- 主色：朱砂红 `#C53A2C`，背景：暖米白 `#F5EFE3`，墨色：`#1A1714`
-- 字体：Noto Serif SC（标题/数字）+ Noto Sans SC（正文）
+- 日报周报
+- 市场洞察
+- 商机中心
+- 管理中心
 
-## 启动
+## 本地启动
 
 ```bash
-cd market/frontend
+cd /Users/xiaoli/Documents/market-product/frontend
 npm install
-npm run dev   # 默认 http://localhost:3000
+npm run dev -- --host 127.0.0.1 --port 8002
 ```
 
-开发态会将 `/api` 代理到 `http://localhost:8000`（FastAPI 后端）。
+开发态代理默认指向 `http://127.0.0.1:8001`，可通过 `API_PROXY_TARGET` 覆盖：
+
+```bash
+API_PROXY_TARGET=http://127.0.0.1:9001 npm run dev -- --host 127.0.0.1 --port 8002
+```
+
+- `/api` → `http://127.0.0.1:8001`
+- `/r` → `http://127.0.0.1:8001`
+- `/re` → `http://127.0.0.1:8001`
 
 ## 路由
 
 | 路径 | 说明 |
 | --- | --- |
 | `/user/login` | 登录页 |
-| `/dashboard` | 日报周报（主页） |
+| `/dashboard` | 日报周报 |
+| `/intelligence` | 市场洞察 |
+| `/intelligence/opportunities` | 标讯线索确认 |
+| `/opportunities` | 商机中心 |
+| `/management` | 管理中心 |
 
-## 核心模块
+## 工程约束
 
-```
-src/
-├── .umirc.ts            # 应用配置/代理/路由/主题
+- 页面面向经营管理者，不展示调试话术。
+- 长耗时动作使用长任务请求超时，避免后端仍在运行但前端误报失败。
+- 管理中心配置必须真实影响后端链路；未接入能力需明确标注。
+- 市场洞察不是原始列表，必须呈现分析、证据和行动建议。
+
+## 主要目录
+
+```text
+frontend/
+├── .umirc.ts
 ├── src/
-│   ├── app.tsx          # 运行时配置 + 鉴权拦截
+│   ├── app.tsx
 │   ├── layouts/
-│   │   └── EditorialLayout.tsx
 │   ├── pages/
-│   │   ├── User/Login/index.tsx
-│   │   └── Dashboard/index.tsx
 │   ├── components/
-│   │   └── StaffDetailDrawer.tsx
 │   ├── services/
-│   │   └── api.ts
 │   ├── constants/
-│   │   └── actionTypes.ts
 │   └── global.less
+└── package.json
 ```

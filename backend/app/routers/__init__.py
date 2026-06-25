@@ -11,9 +11,11 @@ from . import (
     bidding_express,
     crawler,
     crawler_config,
+    dingtalk_robot,
     express,
     import_data,
     llm_config,
+    opportunity_leads,
     reports,
     settings,
     staff,
@@ -31,6 +33,8 @@ api_router.include_router(crawler.intelligence_router)
 api_router.include_router(crawler.crawler_router)
 api_router.include_router(express.router)
 api_router.include_router(bidding_express.router)
+api_router.include_router(opportunity_leads.router)
+api_router.include_router(dingtalk_robot.router)
 # 管理中心新增
 api_router.include_router(crawler_config.router)
 api_router.include_router(llm_config.router)

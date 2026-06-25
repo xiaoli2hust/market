@@ -32,12 +32,12 @@
   box-shadow: -4px 4px 0 var(--ink);
 }
 .login-left::after {
-  content: 'DAILY';
+  content: 'DATA';
   position: absolute;
   top: 92px;
   right: 70px;
   font-family: var(--display);
-  font-size: 28px;
+  font-size: 24px;
   color: var(--paper);
   z-index: 1;
   transform: rotate(8deg);
@@ -70,20 +70,29 @@
   flex-direction: column;
   line-height: 0.98;
 }
+.login-title .brand {
+  font-family: var(--display);
+  font-style: italic;
+  font-weight: 900;
+  font-size: 108px;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+}
 .login-title .zh {
   font-family: var(--serif);
   font-weight: 900;
-  font-size: 92px;
+  font-size: 58px;
   letter-spacing: 0.02em;
-  color: var(--ink);
-}
-.login-title .zh + .zh {
-  margin-top: -6px;
-  margin-left: 32px;
   color: var(--vermilion);
+  margin-top: 6px;
+  margin-left: 42px;
+  width: fit-content;
+  padding-top: 10px;
+  border-top: 3px solid var(--ink);
 }
 .login-title .en {
-  margin-top: 18px;
+  margin-top: 20px;
+  margin-left: 42px;
   font-family: var(--display);
   font-style: italic;
   font-size: 22px;
@@ -280,16 +289,56 @@
     border-bottom: 1.5px solid var(--ink);
     padding: 32px 24px;
   }
-  .login-title .zh {
-    font-size: 56px;
+  .login-title .brand {
+    font-size: 72px;
   }
-  .login-title .zh + .zh {
-    margin-left: 16px;
+  .login-title .zh {
+    font-size: 42px;
+    margin-left: 24px;
+  }
+  .login-title .en {
+    margin-left: 24px;
   }
   .login-decor-cn {
     display: none;
   }
   .login-features {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 560px) {
+  .login-left::before,
+  .login-left::after,
+  .login-stamp {
+    display: none;
+  }
+
+  .login-title .brand {
+    font-size: 56px;
+  }
+
+  .login-title .zh {
+    font-size: 34px;
+    margin-left: 0;
+  }
+
+  .login-title .en {
+    margin-left: 0;
+    font-size: 18px;
+  }
+
+  .login-right {
+    padding: 32px 24px;
+  }
+
+  .login-form-title {
+    font-size: 34px;
+  }
+
+  .login-foot {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
   }
 }

@@ -1,0 +1,78 @@
+name: market-ci
+
+on:
+  push:
+    branches: ["main", "master", "codex/**"]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend acceptance
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+      - name: Install backend dependencies
+        working-directory: backend
+        run: python -m pip install --upgrade pip && python -m pip install -r requirements.txt
+      - name: Compile backend
+        run: python -m compileall backend/app backend/scripts backend/migrations
+      - name: Engineering acceptance
+        run: python backend/scripts/engineering_acceptance.py
+      - name: Unit contracts
+        run: python backend/scripts/unit_contracts.py
+      - name: Public deployment security gate
+        run: |
+          cat > /tmp/market-public.env <<'EOF'
+          COMPOSE_PROJECT_NAME=market-product
+          MARKET_DOMAIN=market.acme-corp.cn
+          ACME_EMAIL=ops@acme-corp.cn
+          POSTGRES_DB=market
+          POSTGRES_USER=market
+          POSTGRES_PASSWORD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+          DATABASE_SCHEMA=marketing
+          JWT_SECRET_KEY=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+          SECRET_ENCRYPTION_KEY=cccccccccccccccccccccccccccccccccccccccc
+          ADMIN_USERNAME=admin
+          ADMIN_PASSWORD=dddddddddddddddddddddddddddddddddddddddd
+          UPLOAD_API_KEY=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+          AUTH_COOKIE_NAME=market_session
+          AUTH_COOKIE_SECURE=true
+          AUTH_COOKIE_SAMESITE=strict
+          CORS_ORIGINS=["https://market.acme-corp.cn"]
+          EOF
+          python backend/scripts/security_quality_gate.py --env /tmp/market-public.env --profile public
+      - name: Business acceptance
+        run: python backend/scripts/business_acceptance.py
+      - name: Crawler coverage acceptance
+        run: python backend/scripts/crawler_coverage_acceptance.py
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Type check
+        working-directory: frontend
+        run: npm run tsc -- --noEmit
+      - name: Build
+        working-directory: frontend
+        run: npm run build
+      - name: Dependency audit
+        working-directory: frontend
+        run: |
+          for attempt in 1 2 3; do
+            npm audit --audit-level=high --omit=dev --registry=https://registry.npmjs.org --fetch-retries=5 --fetch-timeout=60000 && exit 0
+            sleep 5
+          done
+          exit 1

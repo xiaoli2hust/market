@@ -53,6 +53,97 @@
   line-height: 1;
 }
 
+/* —— 管理者复盘 —— */
+.dash-manager {
+  margin: 18px 0 4px;
+  padding: 18px 20px 20px;
+  border: 1.5px solid var(--ink);
+  background: var(--paper-light);
+}
+.dash-manager-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 16px;
+  margin-bottom: 14px;
+}
+.dash-manager-head h2 {
+  margin: 4px 0 0;
+  font-family: var(--serif);
+  font-size: 26px;
+  font-weight: 900;
+  color: var(--ink);
+}
+.dash-manager-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+.dash-manager-card {
+  position: relative;
+  min-height: 98px;
+  padding: 14px 16px;
+  border: 1px solid var(--paper-deep);
+  background: var(--paper);
+  overflow: hidden;
+}
+.dash-manager-icon {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  color: rgba(197, 58, 44, 0.26);
+  font-size: 22px;
+}
+.dash-manager-value {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  color: var(--ink);
+  font-size: 13px;
+}
+.dash-manager-value span {
+  font-family: var(--display);
+  font-size: 34px;
+  line-height: 1;
+}
+.dash-manager-label {
+  margin-top: 8px;
+  color: var(--ink-faint);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+}
+.dash-manager-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.dash-manager-action {
+  min-height: 116px;
+  padding: 14px 16px;
+  border-top: 1px dashed var(--paper-deep);
+  background: rgba(255, 255, 255, 0.26);
+}
+.dash-manager-action span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--vermilion);
+  font-size: 12px;
+}
+.dash-manager-action strong {
+  font-family: var(--serif);
+  font-size: 17px;
+  color: var(--ink);
+}
+.dash-manager-action p {
+  margin: 8px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
 /* —— 筛选 —— */
 .dash-filters {
   padding: 18px 0;
@@ -229,6 +320,10 @@
   gap: 18px;
 }
 @media (max-width: 1100px) {
+  .dash-manager-actions {
+    grid-template-columns: 1fr;
+  }
+
   .dash-groups {
     grid-template-columns: 1fr;
   }
@@ -378,6 +473,56 @@
   }
 }
 
+.dash-weekly-form {
+  display: grid;
+  grid-template-columns: 150px minmax(150px, 1fr) minmax(180px, 1.4fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 14px;
+
+  .ant-upload {
+    display: block;
+  }
+}
+
+.dash-weekly-title {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+
+  strong {
+    color: var(--ink);
+    font-family: var(--serif);
+    font-size: 13px;
+    line-height: 1.35;
+  }
+
+  span {
+    color: var(--ink-faint);
+    font-size: 11px;
+    line-height: 1.35;
+  }
+}
+
+.dash {
+  .ant-pro-table,
+  .ant-table-wrapper {
+    max-width: 100%;
+    overflow: hidden;
+  }
+
+  .ant-table-container,
+  .ant-table-content {
+    max-width: 100%;
+    overflow-x: auto;
+  }
+
+  .ant-empty {
+    max-width: 100%;
+  }
+}
+
 .dash-preview-modal .ant-modal-content {
   border-radius: 0;
 }
@@ -394,4 +539,15 @@
   border: 1px solid var(--paper-deep);
   border-radius: 4px;
   background: #faf6ec;
+}
+
+@media (max-width: 900px) {
+  .dash-report-bar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .dash-weekly-form {
+    grid-template-columns: 1fr;
+  }
 }

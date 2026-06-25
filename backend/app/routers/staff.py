@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..auth import require_permission
 from ..database import get_db
 from ..models import Activity, Staff
 
@@ -71,6 +72,7 @@ async def list_staff(
     is_active: bool | None = None,
     department: str | None = None,
     db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("dashboard:view")),
 ) -> list[dict[str, Any]]:
     """获取人员列表，可按启用状态/部门筛选。"""
 
@@ -85,7 +87,10 @@ async def list_staff(
 
 
 @router.get("/departments")
-async def get_departments(db: AsyncSession = Depends(get_db)) -> list[str]:
+async def get_departments(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("dashboard:view")),
+) -> list[str]:
     """获取所有部门（去重）。"""
 
     stmt = (
@@ -101,6 +106,7 @@ async def get_departments(db: AsyncSession = Depends(get_db)) -> list[str]:
 async def get_staff_detail(
     staff_id: int,
     db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("dashboard:view")),
 ) -> dict[str, Any]:
     """获取个人详情：基础信息 + 近 30 天关键指标 + 最近 20 条活动。"""
 

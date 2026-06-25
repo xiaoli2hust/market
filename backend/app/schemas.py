@@ -33,13 +33,6 @@ class HealthResponse(APIBaseModel):
     version: str | None = None
 
 
-class PlaceholderResponse(APIBaseModel):
-    """路由骨架的占位响应体。"""
-
-    status: str = "not implemented"
-    message: str | None = None
-
-
 # ---------- Staff -------------------------------------------------------------
 
 
@@ -142,6 +135,11 @@ class CrawlerItemOut(APIBaseModel):
     source_url: str | None = None
     published_at: date | None = None
     relevance_score: float | None = None
+    amount_wan: float | None = None
+    buyer: str | None = None
+    region: str | None = None
+    notice_type: str | None = None
+    matched_keywords: list[str] | None = None
     extra_data: dict[str, Any] | None = None
     is_pushed: bool
     created_at: datetime
@@ -207,7 +205,7 @@ class LoginResponse(APIBaseModel):
 
 
 class IntelligenceStats(APIBaseModel):
-    """资讯中心各分类统计。"""
+    """市场洞察各分类统计。"""
 
     total: int = 0
     by_category: dict[str, int] = Field(default_factory=dict)
@@ -223,7 +221,10 @@ class CrawlerStatusOut(APIBaseModel):
     label: str
     total_collected: int = 0
     last_run_at: datetime | None = None
+    last_item_at: datetime | None = None
     last_run_stats: dict[str, Any] | None = None
+    active_sources: int = 0
+    last_error: str | None = None
     status: str = "idle"  # idle / running / error
 
 
@@ -234,15 +235,36 @@ class CrawlRunResult(APIBaseModel):
     total_found: int = 0
     new_saved: int = 0
     duplicates_skipped: int = 0
+    low_score_discarded: int = 0
     errors: int = 0
+    duration_ms: int | None = None
     message: str | None = None
+
+
+class CrawlerRunLogOut(APIBaseModel):
+    """爬虫运行日志。"""
+
+    id: int
+    crawler_name: str
+    category: str
+    status: str
+    total_found: int = 0
+    new_saved: int = 0
+    duplicates_skipped: int = 0
+    low_score_discarded: int = 0
+    errors: int = 0
+    error_message: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    duration_ms: int | None = None
+    extra_data: dict[str, Any] | None = None
+    created_at: datetime
 
 
 __all__ = [
     "APIBaseModel",
     "BaseModel",
     "HealthResponse",
-    "PlaceholderResponse",
     "StaffCreate",
     "StaffOut",
     "DailyReportFileOut",
@@ -251,6 +273,7 @@ __all__ = [
     "StaffActivityBucket",
     "ActivityStats",
     "CrawlerItemOut",
+    "CrawlerRunLogOut",
     "ConversationItem",
     "ImportJsonRequest",
     "ImportJsonResponse",

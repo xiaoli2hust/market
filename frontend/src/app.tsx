@@ -1,19 +1,31 @@
-import type { RequestConfig } from '@umijs/max';
-import { history } from '@umijs/max';
-import { message, notification } from 'antd';
-import { clearAuth, getCurrentUser, getToken } from '@/services/api';
+import type { RequestConfig } from '@@/exports';
+import { history } from '@@/exports';
+import { App as AntdApp, ConfigProvider, message, notification } from 'antd';
+import {
+  clearAuth,
+  fetchCurrentUser,
+  getApiErrorMessage,
+  getCurrentUser,
+  hasAuthSession,
+  logout,
+} from '@/services/api';
+
+ConfigProvider.config({
+  holderRender: (children) => <AntdApp>{children}</AntdApp>,
+});
 
 /**
  * 初始全局状态：登录用户信息
  */
 export async function getInitialState(): Promise<{
   currentUser?: ReturnType<typeof getCurrentUser>;
-  token?: string | null;
 }> {
-  const token = getToken();
+  if (typeof window !== 'undefined' && window.location.pathname === '/user/login') {
+    return { currentUser: null };
+  }
+  const currentUser = await fetchCurrentUser();
   return {
-    currentUser: token ? getCurrentUser() : null,
-    token,
+    currentUser,
   };
 }
 
@@ -21,8 +33,7 @@ export async function getInitialState(): Promise<{
  * 路由守卫：未登录跳转登录页
  */
 export function onRouteChange({ location }: { location: { pathname: string } }) {
-  const token = getToken();
-  if (!token && location.pathname !== '/user/login') {
+  if (!hasAuthSession() && !getCurrentUser() && location.pathname !== '/user/login') {
     history.replace('/user/login');
   }
 }
@@ -38,28 +49,16 @@ export const request: RequestConfig = {
       if (status === 401) {
         notification.warning({ message: '登录已失效，请重新登录' });
         clearAuth();
+        void logout();
         history.replace('/user/login');
         return;
       }
-      message.error(error?.message || '请求失败，请稍后重试');
+      message.error(getApiErrorMessage(error, '请求失败，请稍后重试'));
     },
   },
   requestInterceptors: [
     (url: string, options: any) => {
-      const token = getToken();
-      if (token) {
-        return {
-          url,
-          options: {
-            ...options,
-            headers: {
-              ...(options?.headers || {}),
-              Authorization: `Bearer ${token}`,
-            },
-          },
-        };
-      }
-      return { url, options };
+      return { url, options: { ...options, credentials: 'same-origin' } };
     },
   ],
 };

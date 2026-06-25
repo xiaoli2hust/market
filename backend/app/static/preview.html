@@ -203,7 +203,7 @@
 
   <!-- RIBBON -->
   <div class="ribbon mono">
-    <div class="live">LIVE FROM SQLITE · localhost:8000</div>
+    <div class="live">LIVE FROM SQLITE · localhost:8001</div>
     <div class="center">— FIT TO PRINT, FIT TO PUSH —</div>
     <div>NO. <span id="copyNo">000</span> / FREE FOR INTERNAL USE</div>
   </div>
@@ -223,7 +223,7 @@
         驱动的解析管线已就位。下面是当前数据库（SQLite 本地预览模式）中
         最真实、最未经修饰的销售与解决方案动作切片。
       </p>
-      <div class="byline">编辑部 · <strong>营销数据驾驶舱</strong> · 由 FastAPI 直送</div>
+      <div class="byline">编辑部 · <strong>Market 数据采集中心</strong> · 由 FastAPI 直送</div>
     </div>
     <div class="bignum reveal d3">
       <div class="label">Total Activities</div>
@@ -296,7 +296,7 @@
     <div>
       <h4>Set Sail</h4>
       正式前端启动：安装 Node.js 18+ →
-      <code>cd market/frontend && npm install && npm run dev</code>
+      <code>cd /Users/xiaoli/Documents/market-product/frontend && npm install && npm run dev -- --host 127.0.0.1 --port 8002</code>
     </div>
   </footer>
 
@@ -306,6 +306,12 @@
   const API = "/api";
   const fmt = n => (n ?? 0).toLocaleString("zh-CN");
   const pad = n => String(n).padStart(2,"0");
+  const esc = value => String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 
   const dateZh = (d) => {
     const dt = new Date(d);
@@ -330,7 +336,7 @@
     document.getElementById("issueNo").textContent =
       String(now.getDate()*7 + now.getMonth()*31).padStart(3,"0");
     document.getElementById("copyNo").textContent =
-      String(Math.floor(Math.random()*900+100));
+      `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}`;
     document.getElementById("refreshT").textContent =
       `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
   }
@@ -354,7 +360,7 @@
       const pct = Math.round(e[1]/max*100);
       return `
         <div class="row">
-          <div class="nm"><span class="swatch ${k}"></span>${e[0]}</div>
+          <div class="nm"><span class="swatch ${k}"></span>${esc(e[0])}</div>
           <div class="ct">${fmt(e[1])}</div>
         </div>
         <div class="bar ${k}"><i style="width:${pct}%"></i></div>
@@ -372,9 +378,9 @@
         <div class="row">
           <div class="nm">
             <span class="swatch ${k}"></span>
-            <span><strong>${s.name}</strong>
+            <span><strong>${esc(s.name)}</strong>
             <span class="mono" style="font-size:11px;color:var(--ink-2);margin-left:6px">
-              ${s.role} · ${s.department}</span></span>
+              ${esc(s.role)} · ${esc(s.department)}</span></span>
           </div>
           <div class="ct">${fmt(counts[s.name]||0)}</div>
         </div>`;
@@ -384,7 +390,7 @@
   function renderStories(items, staffMap){
     const el = document.getElementById("stories");
     if(!items.length){
-      el.innerHTML = '<div class="mono" style="color:var(--ink-2)">No dispatches yet — run seed_demo.py to populate.</div>';
+      el.innerHTML = '<div class="mono" style="color:var(--ink-2)">暂无日报动态，请先完成数据导入或运行采集任务。</div>';
       return;
     }
     el.innerHTML = items.map(a=>{
@@ -401,11 +407,11 @@
             ${dt.getFullYear()}.${pad(dt.getMonth()+1)}
           </div>
           <div class="body">
-            <span class="tag ${klass}">${tag}</span>
-            <h3>${a.target || a.opportunity || "未署名机会"}</h3>
-            <p>${a.description || a.summary || ""}</p>
+            <span class="tag ${klass}">${esc(tag)}</span>
+            <h3>${esc(a.target || a.opportunity || "未署名机会")}</h3>
+            <p>${esc(a.description || a.summary || "")}</p>
             <div class="by">
-              报道：<span class="name">${name}</span>${dep?` · ${dep}`:""}
+              报道：<span class="name">${esc(name)}</span>${dep?` · ${esc(dep)}`:""}
               <span class="conf">置信度 ${conf}</span>
             </div>
           </div>
@@ -417,7 +423,7 @@
     const fragments = items.slice(0,18).map(a=>{
       const tag = a.activity_type || a.action_type;
       const tgt = a.target || a.opportunity || "—";
-      return `<span>▦ ${tag} <em>·</em> ${tgt} <em>·</em> ${a.staff_name||a.user_name||""}</span>`;
+      return `<span>▦ ${esc(tag)} <em>·</em> ${esc(tgt)} <em>·</em> ${esc(a.staff_name||a.user_name||"")}</span>`;
     });
     if(!fragments.length) fragments.push('<span>▦ no signal yet</span>');
     const t = document.getElementById("ticker");
@@ -426,7 +432,7 @@
 
   function showError(e){
     const el = document.getElementById("stories");
-    el.innerHTML = `<div class="err">数据获取失败：${e.message}<br/>请确认后端 (uvicorn) 已在 8000 端口运行。</div>`;
+    el.innerHTML = `<div class="err">数据获取失败：${esc(e.message)}<br/>请确认后端服务已在 8001 端口运行。</div>`;
   }
 
   async function boot(){

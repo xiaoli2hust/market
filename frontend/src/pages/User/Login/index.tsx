@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { history } from '@umijs/max';
+import { history } from '@@/exports';
 import { Form, Input, Button, message } from 'antd';
 import dayjs from 'dayjs';
 import { login, setAuth } from '@/services/api';
@@ -12,7 +12,12 @@ const Login: React.FC = () => {
     setLoading(true);
     try {
       const result = await login(values);
-      setAuth(result.token, result.user);
+      setAuth(result.user);
+      if (result.user?.must_change_password) {
+        message.warning('当前仍在使用默认管理员密码，请先到管理中心修改');
+        history.replace('/management?tab=users');
+        return;
+      }
       message.success('登录成功');
       history.replace('/dashboard');
     } catch (e: any) {
@@ -24,49 +29,49 @@ const Login: React.FC = () => {
 
   return (
     <div className="login-page">
-      {/* 左：刊头大字 */}
+      {/* 左：产品刊头 */}
       <aside className="login-left">
-        <div className="login-eyebrow edl-eyebrow">采集 · 洞察 · 驱动</div>
+        <div className="login-eyebrow edl-eyebrow">日报周报 · 市场洞察 · 商机推进 · 管理复盘</div>
         <div className="login-stamp">№ {dayjs().format('YYYYMMDD')}</div>
 
         <h1 className="login-title">
-          <span className="zh">营销数据</span>
-          <span className="zh">驾驶舱</span>
-          <span className="en">Marketing Data Cockpit</span>
+          <span className="brand">Market</span>
+          <span className="zh">数据采集中心</span>
+          <span className="en">Data Collection Center</span>
         </h1>
 
         <div className="login-quote">
           <blockquote>
-            "情报，是先于结果的事实。"
+            "采集，是把外部信号变成可用的数据资产。"
           </blockquote>
-          <cite>— 编辑部按</cite>
+          <cite>— Market Data Collection Center</cite>
         </div>
 
         <div className="login-features">
           <div className="login-feature">
             <span className="feat-num">01</span>
             <div>
-              <div className="feat-zh">每日营销动作快讯</div>
-              <div className="feat-en edl-eyebrow">Daily field briefing</div>
+              <div className="feat-zh">部门日报周报</div>
+              <div className="feat-en edl-eyebrow">Team briefing</div>
             </div>
           </div>
           <div className="login-feature">
             <span className="feat-num">02</span>
             <div>
-              <div className="feat-zh">商机管线一图速览</div>
-              <div className="feat-en edl-eyebrow">Opportunity pipeline</div>
+              <div className="feat-zh">外部信号研判</div>
+              <div className="feat-en edl-eyebrow">Signal discovery</div>
             </div>
           </div>
           <div className="login-feature">
             <span className="feat-num">03</span>
             <div>
-              <div className="feat-zh">团队画像与活跃度</div>
-              <div className="feat-en edl-eyebrow">Team activity portrait</div>
+              <div className="feat-zh">商机推进预测</div>
+              <div className="feat-en edl-eyebrow">Pipeline forecast</div>
             </div>
           </div>
         </div>
 
-        <div className="login-decor-cn">採集 · 洞察 · 驅動</div>
+        <div className="login-decor-cn">发现 · 确认 · 预测</div>
       </aside>
 
       {/* 右：登录表单 */}
@@ -74,7 +79,7 @@ const Login: React.FC = () => {
         <div className="login-form-wrap">
           <div className="edl-eyebrow">Sign In · 凭证登录</div>
           <h2 className="login-form-title">
-            进入<span className="seal">编辑部</span>
+            进入<span className="seal">采集中心</span>
           </h2>
 
           <Form layout="vertical" onFinish={handleSubmit} size="large" requiredMark={false}>
@@ -107,7 +112,7 @@ const Login: React.FC = () => {
           </Form>
 
           <div className="login-foot">
-            <span className="edl-eyebrow">© {dayjs().format('YYYY')} 编辑部 · 内部限阅</span>
+            <span className="edl-eyebrow">© {dayjs().format('YYYY')} Market Data Collection Center · 内部限阅</span>
             <span className="edl-mono login-foot-build">build · {dayjs().format('YY.MM.DD')}</span>
           </div>
         </div>

@@ -10,40 +10,17 @@ from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-import bcrypt
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..auth import get_current_user
+from ..auth import PASSWORD_MIN_LENGTH, get_password_hash, require_permission
 from ..database import get_db
 from ..models import SystemUser, OperationLog
+from ..permissions import ROLES
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/system-users", tags=["system-users"])
-
-# 角色定义
-ROLES = {
-    "super_admin": {"label": "超级管理员", "permissions": ["*"]},
-    "admin": {
-        "label": "管理员",
-        "permissions": [
-            "dashboard:view", "dashboard:export",
-            "reports:view", "reports:generate",
-            "intelligence:view",
-            "opportunities:view",
-            "management:view", "management:crawler", "management:express",
-        ],
-    },
-    "viewer": {
-        "label": "查看者",
-        "permissions": [
-            "dashboard:view",
-            "intelligence:view",
-            "opportunities:view",
-        ],
-    },
-}
 
 
 # ---------------------------------------------------------------------------
@@ -56,7 +33,7 @@ async def list_users(
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_permission("management:users")),
 ) -> dict[str, Any]:
     """用户列表。"""
     total = (await db.execute(select(func.count(SystemUser.id)))).scalar_one() or 0
@@ -83,7 +60,7 @@ async def list_users(
 async def create_user(
     payload: dict[str, Any],
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_permission("management:users")),
 ) -> dict[str, Any]:
     """创建系统用户。"""
     username = payload.get("username", "").strip()
@@ -92,6 +69,8 @@ async def create_user(
 
     if not username or not password:
         raise HTTPException(400, "用户名和密码不能为空")
+    if len(password) < PASSWORD_MIN_LENGTH:
+        raise HTTPException(400, f"密码长度至少{PASSWORD_MIN_LENGTH}位")
     if role not in ROLES:
         raise HTTPException(400, f"无效角色: {role}")
 
@@ -104,7 +83,7 @@ async def create_user(
 
     user = SystemUser(
         username=username,
-        password_hash=bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode(),
+        password_hash=get_password_hash(password),
         role=role,
         display_name=payload.get("display_name", username),
         is_active=payload.get("is_active", True),
@@ -129,7 +108,7 @@ async def update_user(
     user_id: int,
     payload: dict[str, Any],
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_permission("management:users")),
 ) -> dict[str, Any]:
     """编辑用户信息。"""
     user = (await db.execute(
@@ -160,7 +139,7 @@ async def reset_password(
     user_id: int,
     payload: dict[str, str],
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_permission("management:users")),
 ) -> dict[str, str]:
     """重置用户密码。"""
     user = (await db.execute(
@@ -170,10 +149,10 @@ async def reset_password(
         raise HTTPException(404, "用户不存在")
 
     new_password = payload.get("password", "").strip()
-    if not new_password or len(new_password) < 6:
-        raise HTTPException(400, "密码长度至少6位")
+    if not new_password or len(new_password) < PASSWORD_MIN_LENGTH:
+        raise HTTPException(400, f"密码长度至少{PASSWORD_MIN_LENGTH}位")
 
-    user.password_hash = pwd_context.hash(new_password)
+    user.password_hash = get_password_hash(new_password)
     _log_operation(db, _user, "reset_password", user.username)
     return {"status": "ok"}
 
@@ -187,7 +166,7 @@ async def reset_password(
 async def delete_user(
     user_id: int,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_permission("management:users")),
 ) -> dict[str, str]:
     """删除用户。"""
     user = (await db.execute(
@@ -210,7 +189,7 @@ async def delete_user(
 
 @router.get("/roles")
 async def list_roles(
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_permission("management:users")),
 ) -> list[dict[str, Any]]:
     """角色列表及权限矩阵。"""
     return [
@@ -229,7 +208,7 @@ async def get_operation_logs(
     page: int = 1,
     page_size: int = 20,
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(get_current_user),
+    _user: dict = Depends(require_permission("management:users")),
 ) -> dict[str, Any]:
     """获取操作日志。"""
     total = (await db.execute(select(func.count(OperationLog.id)))).scalar_one() or 0

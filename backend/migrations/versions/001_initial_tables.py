@@ -9,6 +9,8 @@ Create Date: 2026-06-11
 
 from __future__ import annotations
 
+import os
+
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
@@ -20,7 +22,7 @@ down_revision = None
 branch_labels = None
 depends_on = None
 
-SCHEMA = "marketing"
+SCHEMA = os.getenv("DATABASE_SCHEMA") or "marketing"
 
 
 def upgrade() -> None:

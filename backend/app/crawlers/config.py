@@ -1,12 +1,12 @@
 """爬虫配置：关键词库、目标站点、调度参数。
 
-所有爬虫配置集中管理，围绕公安/政数/工信场景的智能体(AI Agent)业务。
+所有爬虫配置集中管理，围绕公安/政数/工信/空间数据场景的智能体与时空数据业务。
 """
 
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
-# AI 智能体核心关键词（匹配任意一个即命中）
+# 行业知识核心关键词（匹配任意一个即命中）
 # ---------------------------------------------------------------------------
 AI_KEYWORDS = [
     # ---- 智能体/Agent 核心 ----
@@ -17,11 +17,24 @@ AI_KEYWORDS = [
     "MCP", "tool use", "function calling",
     "ReAct", "RAG",
 
-    # ---- 空间智能 ----
+    # ---- 空间数据 / 时空智能 ----
     "空间智能", "空间智能体",
     "时空智能", "时空大模型",
     "地理AI", "GeoAI",
     "数字孪生", "CIM", "实景三维",
+    "GIS", "GIS平台", "地理信息", "地理信息系统", "测绘地理信息",
+    "空间数据", "地理空间数据", "空间数据治理", "空间数据底座",
+    "时空大数据", "时空信息", "空间计算", "空间分析", "位置智能",
+    "地图服务", "电子地图", "地图平台", "三维GIS",
+    "OSGeo", "GDAL", "PROJ", "QGIS", "PostGIS", "GeoServer", "MapServer",
+    "OpenStreetMap", "OSM", "GeoTools", "GeoTIFF", "GeoPackage",
+    "STAC", "GeoParquet", "PMTiles", "Vector Tile", "矢量切片",
+    "Cloud Optimized GeoTIFF", "COG",
+    "地址治理", "地址标准化", "地址解析", "标准地址",
+    "地理编码", "逆地理编码", "POI数据", "AOI地图数据",
+    "遥感", "遥感影像", "点云", "LiDAR",
+    "高精地图", "自然资源一张图", "国土空间", "地理实体",
+    "地名地址", "统一地址",
 
     # ---- 公安场景 ----
     "公安智能体", "公安AI", "公安大模型",
@@ -87,7 +100,7 @@ BIDDING_KEYWORDS = {
 }
 
 # ---------------------------------------------------------------------------
-# AI 资讯源（RSS + HTTP）
+# 行业知识源（RSS + HTTP）
 # ---------------------------------------------------------------------------
 AI_SOURCES = [
     # ---- RSS 源（最稳定） ----
@@ -131,10 +144,35 @@ AI_SOURCES = [
         },
         "base_url": "https://www.qbitai.com",
     },
+    {
+        "name": "OSGeo Foundation News",
+        "url": "https://www.osgeo.org/foundation-news/feed/",
+        "type": "rss",
+    },
+    {
+        "name": "QGIS.org Blog",
+        "url": "https://blog.qgis.org/feed/",
+        "type": "rss",
+    },
+    {
+        "name": "OpenStreetMap Blog",
+        "url": "https://blog.openstreetmap.org/feed/",
+        "type": "rss",
+    },
+    {
+        "name": "GeoServer Blog",
+        "url": "https://geoserver.org/feed.xml",
+        "type": "rss",
+    },
+    {
+        "name": "GeoTools Blog",
+        "url": "https://geotoolsnews.blogspot.com/feeds/posts/default",
+        "type": "rss",
+    },
 ]
 
 # ---------------------------------------------------------------------------
-# 市场动态源（政府官网）
+# 市场线索源（政府官网）
 # ---------------------------------------------------------------------------
 MARKET_SOURCES = [
     {
@@ -149,21 +187,153 @@ MARKET_SOURCES = [
         },
         "base_url": "http://www.mnr.gov.cn/dt/ywbb/",
     },
+    {
+        "name": "地方数字化动态直采",
+        "type": "direct_pages",
+        "pages": [
+            {
+                "name": "福建省数据管理局",
+                "url": "https://fgw.fujian.gov.cn/ztzl/szfjzt/tzgg/202606/t20260603_7155547.htm",
+            },
+            {
+                "name": "锡林郭勒盟行政公署",
+                "url": "https://www.xlgl.gov.cn/xlgl/zw/xsxxgk/fdzdgknr/zcwj/xswj/2026032017203520482/index.html",
+            },
+        ],
+    },
 ]
 
-# 兼容旧变量名
-MARKET_KEYWORDS = AI_KEYWORDS[:30]  # 取前30个核心词作为市场动态关键词
+# 兼容旧变量名，后面会被标讯业务关键词口径覆盖
+MARKET_KEYWORDS = AI_KEYWORDS[:30]
 
 # ---------------------------------------------------------------------------
-# 竞对监控（暂不配置，后续按需添加）
+# 政策公开入口（政策 Agent）
+# ---------------------------------------------------------------------------
+POLICY_SOURCES = [
+    {
+        "name": "国家数据局2026政策直采",
+        "type": "direct_pages",
+        "pages": [
+            {
+                "name": "国家数据局",
+                "url": "https://www.nda.gov.cn/sjj/zwgk/zcfb/0618/20260618145942270461999_pc.html",
+            },
+            {
+                "name": "国家数据局",
+                "url": "https://www.nda.gov.cn/sjj/zwgk/zcfb/0608/20260608172117399715004_pc.html",
+            },
+            {
+                "name": "国家数据局",
+                "url": "https://www.nda.gov.cn/sjj/zwgk/tzgg/0428/20260428215540161552208_pc.html",
+            },
+            {
+                "name": "国家数据局",
+                "url": "https://www.nda.gov.cn/sjj/zwgk/tzgg/0427/20260427215820802616908_pc.html",
+            },
+            {
+                "name": "国家数据局",
+                "url": "https://www.nda.gov.cn/sjj/zwgk/tzgg/0427/20260427194243782883135_pc.html",
+            },
+            {
+                "name": "国家数据局",
+                "url": "https://www.nda.gov.cn/sjj/zwgk/tzgg/0409/20260409092900412958913_pc.html",
+            },
+            {
+                "name": "国家数据局",
+                "url": "https://www.nda.gov.cn/sjj/zwgk/tzgg/0213/20260213090050171653926_pc.html",
+            },
+            {
+                "name": "国家数据局",
+                "url": "https://www.nda.gov.cn/sjj/swdt/xwfb/0611/20260611200405792154005_pc.html",
+            },
+        ],
+    },
+    {
+        "name": "地方数字化政策直采",
+        "type": "direct_pages",
+        "pages": [
+            {
+                "name": "重庆市人民政府",
+                "url": "https://www.cq.gov.cn/zwgk/zfxxgkml/szfwj/qtgw/202602/t20260212_15440236.html",
+            },
+            {
+                "name": "北京市政务服务和数据管理局",
+                "url": "https://zwfwj.beijing.gov.cn/zwgk/2024zcwj/202409/t20240927_3908531.html",
+            },
+        ],
+    },
+    {
+        "name": "国家数据局政务公开",
+        "url": "https://www.nda.gov.cn/sjj/zwgk/list/index_pc_1.html",
+        "type": "http",
+        "base_url": "https://www.nda.gov.cn",
+        "selectors": {
+            "list": ".u-list li, li, tr",
+            "title": "a",
+            "link": "a@href",
+            "date": "span, td",
+        },
+    },
+    {
+        "name": "国家发展改革委政务公开",
+        "url": "https://www.ndrc.gov.cn/xxgk/",
+        "type": "http",
+        "base_url": "https://www.ndrc.gov.cn",
+        "selectors": {
+            "list": "li, .u-list li, .list li, tr",
+            "title": "a",
+            "link": "a@href",
+            "date": "span, td",
+        },
+    },
+    {
+        "name": "自然资源部通知公告",
+        "url": "https://www.mnr.gov.cn/gk/tzgg/",
+        "type": "http",
+        "base_url": "https://www.mnr.gov.cn",
+        "selectors": {
+            "list": "li, .list li, tr",
+            "title": "a",
+            "link": "a@href",
+            "date": "span, td",
+        },
+    },
+]
+
+POLICY_KEYWORDS = [
+    "数字中国", "数字经济", "数字政府", "数据要素", "公共数据", "数据资源",
+    "高质量数据集", "数据治理", "数据安全", "智慧城市", "城市更新",
+    "一网统管", "一网通办", "政务服务", "人工智能", "大模型", "智能体",
+    "公安", "公共安全", "社会治理", "自然资源", "实景三维", "CIM",
+    "房屋建筑统一代码", "低空经济", "信用体系", "信创", "工业互联网",
+]
+
+# ---------------------------------------------------------------------------
+# 竞对监控（默认留空，建议在管理中心配置竞对官网/公众号聚合页/RSS）
 # ---------------------------------------------------------------------------
 COMPETITORS = []
+
+COMPETITOR_EVENT_KEYWORDS = {
+    "bidding_win": ["中标", "成交", "入围", "候选人", "采购结果"],
+    "customer_case": ["案例", "客户", "落地", "上线", "实践", "应用"],
+    "product_update": ["发布", "推出", "升级", "新版本", "平台", "方案", "产品"],
+    "partnership": ["合作", "签约", "战略", "协议", "生态", "联合"],
+    "regional_push": ["分公司", "区域", "办事处", "基地", "中心"],
+    "recruitment": ["招聘", "校招", "社招", "人才", "岗位"],
+    "qualification": ["资质", "专利", "软著", "标准", "认证", "荣誉"],
+}
+
+COMPETITOR_KEYWORDS = [
+    "中标", "成交", "客户", "案例", "数字政府", "智慧城市", "公安",
+    "数据治理", "数字孪生", "实景三维", "CIM", "GIS", "时空大数据",
+    "大模型", "人工智能", "智能体", "合作", "产品", "方案", "招聘",
+]
 
 # ---------------------------------------------------------------------------
 # 标讯关键词（来自"标讯的研判标准0310-3.xlsx" + 业务扩展）
 # ---------------------------------------------------------------------------
 
-# 行业关键词 —— 用于剑鱼搜索（搜索词要宽泛，宁多勿漏）
+# 行业关键词 —— 用于结构化标讯检索（搜索词要宽泛，宁多勿漏）
 JIANYU_INDUSTRY_KEYWORDS = {
     "toG_公安": [
         # 核心主体
@@ -193,6 +363,7 @@ JIANYU_INDUSTRY_KEYWORDS = {
         # 数据/平台
         "数据中台", "数据共享", "数据开放", "政务云", "电子政务",
         "政务数据", "公共数据", "数据资源",
+        "数智", "数字化项目", "数智信息化", "电力数字化", "运营商数字化",
         # 技术方向
         "数字孪生", "CIM", "实景三维", "BIM", "GIS",
         "时空大数据", "时空信息", "地理信息", "测绘",
@@ -293,8 +464,9 @@ JIANYU_BUSINESS_KEYWORDS = {
         "电子地图", "地图服务", "GIS服务", "地理信息",
         "数据采集", "数据治理", "数据共享", "数据开放",
         "政务数据", "公共数据",
+        "数智", "数字化项目", "数智信息化", "电力数字化", "运营商数字化",
         # 前沿技术
-        "智能体", "AGENT", "大模型",
+        "智能体", "AGENT", "AI", "大模型",
     ],
     "toB_零售": [
         # 服务/售后核心
@@ -346,7 +518,7 @@ JIANYU_BUSINESS_KEYWORDS = {
     ],
 }
 
-# 搜索关键词 —— 实际在剑鱼网搜索的词（精选，避免过多搜索耗时）
+# 搜索关键词 —— 实际用于结构化标讯检索的词（精选，避免过多搜索耗时）
 # 每个方向选最有代表性、覆盖面最广的 8-12 个词
 JIANYU_SEARCH_KEYWORDS_SELECTED = [
     # toG 公安（搜这些就能覆盖绝大部分公安标讯）
@@ -372,6 +544,52 @@ JIANYU_SEARCH_KEYWORDS_SELECTED = [
 JIANYU_ALL_BUSINESS_KEYWORDS = []
 for kws in JIANYU_BUSINESS_KEYWORDS.values():
     JIANYU_ALL_BUSINESS_KEYWORDS.extend(kws)
+
+FOCUSED_INDUSTRY_KEYWORDS = [
+    # 目标行业 + 能力组合词，避免单独行业词触发泛政策/泛新闻。
+    "公安大数据", "公安信息化", "公安地图", "警用地理", "警用GIS",
+    "政数局", "数据局", "大数据局", "数字政府", "政务数据", "公共数据",
+    "数据要素", "数据资源", "数据治理", "数据运营",
+    "电力GIS", "电力地图", "电网GIS", "电网地图", "电力一张图", "能源大数据",
+    "运营商地址", "运营商地图", "移动地址", "联通地址", "电信地址",
+    "自然资源信息化", "自然资源一张图", "自然资源数字化",
+    "住建地图", "城管地图", "交通地图", "应急一张图",
+    # 能力方向，可单独触发。
+    "地址", "标准地址", "地址治理", "地址标准化", "地址解析", "地址匹配",
+    "地图", "电子地图", "公安地图", "警用地图", "GIS", "PGIS",
+    "空间", "空间智能", "时空", "时空大数据", "地理信息", "位置智能",
+    "实景三维", "数字孪生", "CIM", "一张图",
+    "房屋建筑统一代码", "地名地址", "统一地址", "公共数据授权运营",
+    "数据基础设施", "高质量数据集",
+    "智能体", "Agent", "AGENT", "大模型", "AI",
+]
+
+
+def _dedupe_keywords(*groups: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for group in groups:
+        for keyword in group:
+            kw = str(keyword).strip()
+            if not kw:
+                continue
+            key = kw.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            result.append(kw)
+    return result
+
+
+POLICY_MARKET_KEYWORDS = _dedupe_keywords(
+    JIANYU_SEARCH_KEYWORDS_SELECTED,
+    JIANYU_ALL_BUSINESS_KEYWORDS,
+    FOCUSED_INDUSTRY_KEYWORDS,
+)
+
+# 政策法规、市场线索和标讯雷达保持同一业务口径，避免抓泛政策/泛新闻。
+POLICY_KEYWORDS = POLICY_MARKET_KEYWORDS
+MARKET_KEYWORDS = POLICY_MARKET_KEYWORDS
 
 # 标讯评分标准（简化版，基于研判标准Excel）
 BIDDING_SCORE_RULES = {
@@ -410,10 +628,11 @@ JIANYU_COOKIE_DIR = "cookies/jianyu"
 # 分类字典（前端展示用）
 # ---------------------------------------------------------------------------
 CATEGORIES = {
-    "bidding": {"label": "标讯信息", "color": "#f5222d", "icon": "FileSearchOutlined"},
-    "news": {"label": "市场动态", "color": "#1890ff", "icon": "GlobalOutlined"},
+    "bidding": {"label": "标讯雷达", "color": "#f5222d", "icon": "FileSearchOutlined"},
+    "policy": {"label": "政策研判", "color": "#13c2c2", "icon": "GlobalOutlined"},
+    "news": {"label": "市场线索", "color": "#1890ff", "icon": "GlobalOutlined"},
     "competitor": {"label": "竞对监控", "color": "#fa8c16", "icon": "EyeOutlined"},
-    "ai": {"label": "AI资讯", "color": "#722ed1", "icon": "RobotOutlined"},
+    "ai": {"label": "行业知识", "color": "#722ed1", "icon": "RobotOutlined"},
 }
 
 # ---------------------------------------------------------------------------
@@ -427,4 +646,7 @@ CRAWLER_USER_AGENT = (
 
 CRAWLER_TIMEOUT = 30  # 秒
 CRAWLER_MAX_ITEMS_PER_SOURCE = 20
+CRAWLER_MAX_ITEMS_PER_RUN = 200
 CRAWLER_RELEVANCE_THRESHOLD = 30  # 低于此分数丢弃
+CRAWLER_RESPECT_ROBOTS = True
+CRAWLER_MIN_REQUEST_INTERVAL = 1.0

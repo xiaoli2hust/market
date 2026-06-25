@@ -1,7 +1,14 @@
 node_modules
 dist
+src/.umi
+src/.umi-production
+src/.umi-test
+.umi
+.umi-production
+.umi-test
 .env
 .env.local
 .git
 .gitignore
 *.log
+.DS_Store

@@ -22,15 +22,20 @@ import {
   Tabs,
   Tag,
   Typography,
+  Upload,
   message,
 } from 'antd';
 import {
+  AlertOutlined,
+  BarChartOutlined,
+  CalendarOutlined,
   LeftOutlined,
   ReloadOutlined,
   RightOutlined,
   SearchOutlined,
   FileTextOutlined,
   CopyOutlined,
+  DeleteOutlined,
   EyeOutlined,
   ExportOutlined,
   PlusOutlined,
@@ -38,30 +43,42 @@ import {
   CheckCircleOutlined,
   FileSearchOutlined,
   PictureOutlined,
+  RobotOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 import { ProTable, ProColumns } from '@ant-design/pro-components';
 import dayjs, { Dayjs } from 'dayjs';
 import {
   ActivityItem,
-  DashboardStats,
   fetchActivities,
-  fetchDashboardStats,
   fetchDepartments,
   fetchStaff,
   Staff,
   fetchReports,
   fetchReportDetail,
+  fetchDepartmentWeeklyReports,
+  fetchDepartmentWeeklyReportDetail,
   generateReport,
+  uploadDepartmentWeeklyReport,
+  deleteDepartmentWeeklyReport,
   pushReport,
   pushExpress,
   fetchExpressList,
+  fetchExpressDetail,
   generateExpress,
   generateBiddingExpress,
   getLatestBiddingExpress,
   pushBiddingExpress,
+  fetchBiddingExpressPreviewHtml,
+  fetchIntelligenceStats,
+  getApiErrorMessage,
+  getCurrentUser,
   ReportItem,
   ReportDetail,
+  DepartmentWeeklyReportItem,
+  DepartmentWeeklyReportDetail,
   ExpressItem,
+  userHasPermission,
 } from '@/services/api';
 import { ACTION_TYPES, getActionMeta } from '@/constants/actionTypes';
 import StaffDetailDrawer from '@/components/StaffDetailDrawer';
@@ -83,7 +100,38 @@ interface FilterState {
   keyword: string;
 }
 
+function sanitizeHtmlForPreview(html: string): string {
+  if (typeof window === 'undefined') return html;
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  doc.querySelectorAll('script, iframe, object, embed').forEach((node) => node.remove());
+  doc.querySelectorAll('*').forEach((node) => {
+    Array.from(node.attributes).forEach((attr) => {
+      const name = attr.name.toLowerCase();
+      const value = attr.value.trim().toLowerCase();
+      if (name.startsWith('on') || name === 'srcdoc' || value.startsWith('javascript:')) {
+        node.removeAttribute(attr.name);
+      }
+    });
+  });
+  return doc.documentElement.outerHTML;
+}
+
+function getWeekMonday(value: Dayjs): Dayjs {
+  return value.subtract((value.day() + 6) % 7, 'day').startOf('day');
+}
+
+function formatFileSize(bytes?: number): string {
+  const value = Number(bytes || 0);
+  if (!value) return '0 KB';
+  if (value >= 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(value / 1024))} KB`;
+}
+
 const Dashboard: React.FC = () => {
+  const currentUser = getCurrentUser();
+  const canViewReports = userHasPermission(currentUser, 'reports:view');
+  const canGenerateReports = userHasPermission(currentUser, 'reports:generate');
+  const canManageExpress = userHasPermission(currentUser, 'management:express');
   const [filter, setFilter] = useState<FilterState>(() => {
     const today = dayjs();
     // 如果有数据，默认显示最近有数据的日期范围
@@ -98,7 +146,6 @@ const Dashboard: React.FC = () => {
     };
   });
 
-  const [stats, setStats] = useState<DashboardStats | null>(null);
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [departments, setDepartments] = useState<string[]>([]);
   const [activities, setActivities] = useState<ActivityItem[]>([]);
@@ -122,6 +169,18 @@ const Dashboard: React.FC = () => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [reportSectionExpanded, setReportSectionExpanded] = useState(false);
 
+  // —— 部门周报归档 ——
+  const [departmentWeeklyReports, setDepartmentWeeklyReports] = useState<DepartmentWeeklyReportItem[]>([]);
+  const [departmentWeeklyTotal, setDepartmentWeeklyTotal] = useState(0);
+  const [departmentWeeklyLoading, setDepartmentWeeklyLoading] = useState(false);
+  const [departmentWeeklyUploading, setDepartmentWeeklyUploading] = useState(false);
+  const [departmentWeeklyWeek, setDepartmentWeeklyWeek] = useState<Dayjs>(getWeekMonday(dayjs()));
+  const [departmentWeeklyDepartment, setDepartmentWeeklyDepartment] = useState('');
+  const [departmentWeeklyTitle, setDepartmentWeeklyTitle] = useState('');
+  const [departmentWeeklyPreviewVisible, setDepartmentWeeklyPreviewVisible] = useState(false);
+  const [departmentWeeklyPreview, setDepartmentWeeklyPreview] = useState<DepartmentWeeklyReportDetail | null>(null);
+  const [departmentWeeklyPreviewLoading, setDepartmentWeeklyPreviewLoading] = useState(false);
+
   // —— 推送相关状态 ——
   const [pushingReportId, setPushingReportId] = useState<number | null>(null);
   const [pushingExpressId, setPushingExpressId] = useState<number | null>(null);
@@ -138,9 +197,6 @@ const Dashboard: React.FC = () => {
       setStaffList(s);
       setDepartments(d);
     })();
-    fetchDashboardStats()
-      .then(setStats)
-      .catch(() => setStats(null));
   }, []);
 
   // —— 报告相关函数 ——
@@ -162,6 +218,82 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     if (reportSectionExpanded) loadReports();
   }, [reportSectionExpanded, loadReports]);
+
+  const loadDepartmentWeeklyReports = useCallback(async () => {
+    setDepartmentWeeklyLoading(true);
+    try {
+      const resp = await fetchDepartmentWeeklyReports({
+        week_start: getWeekMonday(departmentWeeklyWeek).format('YYYY-MM-DD'),
+        department: departmentWeeklyDepartment.trim() || undefined,
+        page: 1,
+        page_size: 20,
+      });
+      setDepartmentWeeklyReports(resp?.items || []);
+      setDepartmentWeeklyTotal(resp?.total || 0);
+    } catch {
+      setDepartmentWeeklyReports([]);
+      setDepartmentWeeklyTotal(0);
+    } finally {
+      setDepartmentWeeklyLoading(false);
+    }
+  }, [departmentWeeklyDepartment, departmentWeeklyWeek]);
+
+  useEffect(() => {
+    if (reportSectionExpanded) loadDepartmentWeeklyReports();
+  }, [reportSectionExpanded, loadDepartmentWeeklyReports]);
+
+  const handleUploadDepartmentWeekly = async (file: File) => {
+    const department = departmentWeeklyDepartment.trim();
+    if (!department) {
+      message.warning('请先填写部门名称');
+      return false;
+    }
+    if (!file.name.toLowerCase().endsWith('.html') && !file.name.toLowerCase().endsWith('.htm')) {
+      message.warning('仅支持上传 HTML/HTM 周报文件');
+      return false;
+    }
+    setDepartmentWeeklyUploading(true);
+    try {
+      await uploadDepartmentWeeklyReport({
+        department,
+        week_start: getWeekMonday(departmentWeeklyWeek).format('YYYY-MM-DD'),
+        title: departmentWeeklyTitle.trim() || undefined,
+        file,
+      });
+      message.success('部门周报已归档');
+      setDepartmentWeeklyTitle('');
+      await loadDepartmentWeeklyReports();
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '部门周报上传失败'));
+    } finally {
+      setDepartmentWeeklyUploading(false);
+    }
+    return false;
+  };
+
+  const handlePreviewDepartmentWeekly = async (id: number) => {
+    setDepartmentWeeklyPreviewVisible(true);
+    setDepartmentWeeklyPreview(null);
+    setDepartmentWeeklyPreviewLoading(true);
+    try {
+      const detail = await fetchDepartmentWeeklyReportDetail(id);
+      setDepartmentWeeklyPreview(detail);
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '加载部门周报失败'));
+    } finally {
+      setDepartmentWeeklyPreviewLoading(false);
+    }
+  };
+
+  const handleDeleteDepartmentWeekly = async (id: number) => {
+    try {
+      await deleteDepartmentWeeklyReport(id);
+      message.success('部门周报已删除');
+      await loadDepartmentWeeklyReports();
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '删除部门周报失败'));
+    }
+  };
 
   const handleGenerateClick = (type: 'daily' | 'weekly') => {
     setNoteDialogType(type);
@@ -187,13 +319,13 @@ const Dashboard: React.FC = () => {
       if (autoPush && result?.id) {
         const pushResult = await pushReport(result.id, { base_url: window.location.origin });
         if (pushResult.success) {
-          message.success('✅ 已自动推送到钉钉');
+          message.success('已自动推送到钉钉');
         } else {
-          message.warning('⚠️ 生成成功，但推送失败：' + pushResult.message);
+          message.warning('生成成功，但推送失败：' + pushResult.message);
         }
       }
-    } catch {
-      message.error('生成报告失败，请稍后重试');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '生成报告失败，请稍后重试'));
     } finally {
       setGenerating(null);
     }
@@ -206,8 +338,8 @@ const Dashboard: React.FC = () => {
     try {
       const detail = await fetchReportDetail(record.id);
       setPreviewDetail(detail);
-    } catch {
-      message.error('加载报告详情失败');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '加载报告详情失败'));
     } finally {
       setPreviewLoading(false);
     }
@@ -222,7 +354,7 @@ const Dashboard: React.FC = () => {
   };
 
   const handleOpenNewWindow = (shareUrl: string) => {
-    window.open(window.location.origin + shareUrl, '_blank');
+    window.open(window.location.origin + shareUrl, '_blank', 'noopener,noreferrer');
   };
 
   // —— 报告转图片 ——
@@ -240,9 +372,9 @@ const Dashboard: React.FC = () => {
         });
       }
 
-      // 创建临时容器渲染 HTML
+      // 在离屏容器中渲染 HTML，避免影响当前预览布局。
       const container = document.createElement('div');
-      container.innerHTML = previewDetail.html_content;
+      container.innerHTML = sanitizeHtmlForPreview(previewDetail.html_content);
       container.style.position = 'absolute';
       container.style.left = '-9999px';
       container.style.width = '900px';
@@ -283,8 +415,8 @@ const Dashboard: React.FC = () => {
       } else {
         message.error(result.message || '推送失败');
       }
-    } catch {
-      message.error('推送失败，请检查钉钉配置');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '推送失败，请检查钉钉配置'));
     } finally {
       setPushingReportId(null);
     }
@@ -301,10 +433,25 @@ const Dashboard: React.FC = () => {
       } else {
         message.error(result.message || '推送失败');
       }
-    } catch {
-      message.error('推送失败，请检查钉钉配置');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '推送失败，请检查钉钉配置'));
     } finally {
       setPushingExpressId(null);
+    }
+  };
+
+  const handlePreviewExpress = async (expressId: number) => {
+    try {
+      const detail = await fetchExpressDetail(expressId);
+      if (!detail?.html_content) {
+        message.warning('速递内容为空，请重新生成后预览');
+        return;
+      }
+      const blobUrl = URL.createObjectURL(new Blob([detail.html_content], { type: 'text/html;charset=utf-8' }));
+      window.open(blobUrl, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '加载速递详情失败'));
     }
   };
 
@@ -332,8 +479,8 @@ const Dashboard: React.FC = () => {
       await generateExpress({ date: dayjs().format('YYYY-MM-DD') });
       message.success('今日速递生成成功');
       loadExpressList();
-    } catch {
-      message.error('生成速递失败');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '生成速递失败'));
     } finally {
       setGeneratingExpress(false);
     }
@@ -341,6 +488,7 @@ const Dashboard: React.FC = () => {
 
   // —— 标讯速递 ——
   const [biddingExpress, setBiddingExpress] = useState<any>(null);
+  const [biddingPeriod, setBiddingPeriod] = useState<'day' | 'week' | 'month' | 'all'>('week');
   const [generatingBidding, setGeneratingBidding] = useState(false);
   const [pushingBidding, setPushingBidding] = useState(false);
 
@@ -354,11 +502,14 @@ const Dashboard: React.FC = () => {
   const handleGenerateBidding = async () => {
     setGeneratingBidding(true);
     try {
-      const resp = await generateBiddingExpress({});
+      const resp = await generateBiddingExpress({
+        date: dayjs().format('YYYY-MM-DD'),
+        period: biddingPeriod,
+      });
       message.success(resp.message || '标讯速递生成成功');
       setBiddingExpress(resp);
-    } catch {
-      message.error('生成标讯速递失败');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '生成标讯速递失败'));
     } finally {
       setGeneratingBidding(false);
     }
@@ -373,10 +524,21 @@ const Dashboard: React.FC = () => {
       } else {
         message.error(resp.message || '推送失败');
       }
-    } catch {
-      message.error('推送失败，请检查钉钉配置');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '推送失败，请检查钉钉配置'));
     } finally {
       setPushingBidding(false);
+    }
+  };
+
+  const handlePreviewBidding = async () => {
+    try {
+      const html = await fetchBiddingExpressPreviewHtml();
+      const blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+      window.open(blobUrl, '_blank', 'noopener,noreferrer');
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '预览失败，请先生成标讯速递'));
     }
   };
 
@@ -468,9 +630,7 @@ const Dashboard: React.FC = () => {
   /* —— 数据看板统计 —— */
   const [biddingStats, setBiddingStats] = useState<any>(null);
   useEffect(() => {
-    // 获取标讯统计
-    fetch('/api/intelligence/stats')
-      .then(r => r.json())
+    fetchIntelligenceStats()
       .then(data => setBiddingStats(data))
       .catch(() => {});
   }, []);
@@ -488,6 +648,36 @@ const Dashboard: React.FC = () => {
       .filter((d) => d.count > 0)
       .sort((a, b) => b.count - a.count);
   }, [activities]);
+
+  const managementReview = useMemo(() => {
+    const riskItems = activities
+      .filter((a) => /风险|延期|延迟|回款|招投标|投标|待确认|未确认|介入/.test(a.summary || ''))
+      .slice(0, 3);
+    const topAction = actionDistribution[0];
+    return {
+      riskItems,
+      cards: [
+        { label: '团队动作', value: activities.length, unit: '条', icon: <BarChartOutlined /> },
+        { label: '商机相关', value: followingOpps, unit: '个', icon: <CheckCircleOutlined /> },
+        { label: '今日信号', value: biddingStats?.today_count || 0, unit: '条', icon: <FileSearchOutlined /> },
+        { label: '待介入', value: riskItems.length, unit: '项', icon: <AlertOutlined /> },
+      ],
+      actions: [
+        {
+          title: '团队在忙什么',
+          text: topAction ? `本期最多的是「${topAction.label}」，共 ${topAction.count} 条。` : '本期暂无可分析动作。',
+        },
+        {
+          title: '哪些商机要介入',
+          text: riskItems[0]?.summary || '当前没有明显风险关键词，建议继续关注关键商机确认记录。',
+        },
+        {
+          title: '外部信号有什么变化',
+          text: `市场洞察今日新增 ${biddingStats?.today_count || 0} 条，可同步查看标讯雷达 Agent。`,
+        },
+      ],
+    };
+  }, [activities, actionDistribution, biddingStats, followingOpps]);
 
   /* —— 列定义 —— */
   const columns: ProColumns<ActivityItem>[] = [
@@ -595,6 +785,40 @@ const Dashboard: React.FC = () => {
       </div>
 
       <hr className="edl-rule-strong" />
+
+      <div className="dash-manager edl-rise edl-rise-2">
+        <div className="dash-manager-head">
+          <div>
+            <div className="edl-eyebrow">Management Review</div>
+            <h2>管理者复盘视角</h2>
+          </div>
+          <div className="dash-manager-note">
+            <RobotOutlined /> 自动汇总团队动作、商机风险与外部信号变化
+          </div>
+        </div>
+        <Row gutter={[14, 14]}>
+          {managementReview.cards.map((card) => (
+            <Col xs={12} md={6} key={card.label}>
+              <div className="dash-manager-card">
+                <div className="dash-manager-icon">{card.icon}</div>
+                <div className="dash-manager-value">
+                  <span>{card.value}</span>{card.unit}
+                </div>
+                <div className="dash-manager-label">{card.label}</div>
+              </div>
+            </Col>
+          ))}
+        </Row>
+        <div className="dash-manager-actions">
+          {managementReview.actions.map((item, index) => (
+            <div className="dash-manager-action" key={item.title}>
+              <span className="edl-mono">0{index + 1}</span>
+              <strong>{item.title}</strong>
+              <p>{item.text}</p>
+            </div>
+          ))}
+        </div>
+      </div>
 
       {/* 筛选栏 */}
       <div className="dash-filters edl-rise edl-rise-2">
@@ -792,6 +1016,8 @@ const Dashboard: React.FC = () => {
             <Button
               icon={<PlusOutlined />}
               loading={generating === 'daily'}
+              disabled={!canGenerateReports}
+              title={!canGenerateReports ? '当前账号无报告生成权限' : undefined}
               onClick={() => handleGenerateClick('daily')}
               size="small"
             >
@@ -800,17 +1026,21 @@ const Dashboard: React.FC = () => {
             <Button
               icon={<PlusOutlined />}
               loading={generating === 'weekly'}
+              disabled={!canGenerateReports}
+              title={!canGenerateReports ? '当前账号无报告生成权限' : undefined}
               onClick={() => handleGenerateClick('weekly')}
               size="small"
             >
               生成周报
             </Button>
-            <a
-              className="dash-report-toggle"
-              onClick={() => setReportSectionExpanded(!reportSectionExpanded)}
-            >
-              {reportSectionExpanded ? '收起历史 ▲' : '历史报告 ▼'}
-            </a>
+            {canViewReports && (
+              <a
+                className="dash-report-toggle"
+                onClick={() => setReportSectionExpanded(!reportSectionExpanded)}
+              >
+                {reportSectionExpanded ? '收起历史 ▲' : '历史报告 ▼'}
+              </a>
+            )}
           </Space>
         </div>
 
@@ -838,12 +1068,15 @@ const Dashboard: React.FC = () => {
                       title: '标题',
                       dataIndex: 'title',
                       ellipsis: true,
-                      render: (text: string) => (
-                        <span style={{ fontFamily: 'var(--serif)', fontWeight: 600, fontSize: 13 }}>
-                          {text || '—'}
-                        </span>
-                      ),
-                    },
+	                      render: (text: string, record: ReportItem) => (
+	                        <Space size={6}>
+	                          <span style={{ fontFamily: 'var(--serif)', fontWeight: 600, fontSize: 13 }}>
+	                            {text || '—'}
+	                          </span>
+	                          <Tag style={{ margin: 0, fontSize: 11 }}>v{record.version || 1}</Tag>
+	                        </Space>
+	                      ),
+	                    },
                     {
                       title: '类型',
                       dataIndex: 'report_type',
@@ -854,19 +1087,32 @@ const Dashboard: React.FC = () => {
                         </Tag>
                       ),
                     },
-                    {
-                      title: '日期',
+	                    {
+	                      title: '日期',
                       dataIndex: 'report_date',
                       width: 110,
                       render: (date: string) => (
                         <span className="edl-mono" style={{ fontSize: 12 }}>
                           {dayjs(date).format('YYYY·MM·DD')}
                         </span>
-                      ),
-                    },
-                    {
-                      title: '操作',
-                      key: 'action',
+	                      ),
+	                    },
+	                    {
+	                      title: '状态',
+	                      dataIndex: 'status',
+	                      width: 86,
+	                      render: (status: string) => {
+	                        const meta = status === 'published'
+	                          ? { color: 'green', text: '已发布' }
+	                          : status === 'superseded'
+	                            ? { color: 'default', text: '已归档' }
+	                            : { color: 'blue', text: '草稿' };
+	                        return <Tag color={meta.color} style={{ margin: 0, fontSize: 11 }}>{meta.text}</Tag>;
+	                      },
+	                    },
+	                    {
+	                      title: '操作',
+	                      key: 'action',
                       width: 260,
                       render: (_: unknown, record: ReportItem) => (
                         <Space size={8}>
@@ -883,11 +1129,19 @@ const Dashboard: React.FC = () => {
                               </a>
                             </>
                           )}
-                          {record.push_status === 'pushed' ? (
+	                          {record.status === 'published' ? (
+	                            <span style={{ color: 'var(--ink-faint)', fontSize: 12 }}>
+	                              <CheckCircleOutlined /> 已发布
+	                            </span>
+	                          ) : record.status === 'superseded' ? (
+	                            <span style={{ color: 'var(--ink-faint)', fontSize: 12 }}>
+	                              已归档
+	                            </span>
+	                          ) : !canGenerateReports ? (
                             <span style={{ color: 'var(--ink-faint)', fontSize: 12 }}>
-                              <CheckCircleOutlined /> 已推送
+                              无推送权限
                             </span>
-                          ) : (
+	                          ) : (
                             <Popconfirm
                               title="确定推送到钉钉群？"
                               description="推送后将发送 Markdown 消息给群成员"
@@ -896,7 +1150,7 @@ const Dashboard: React.FC = () => {
                               cancelText="取消"
                             >
                               <a className="dash-rpt-link" style={{ color: 'var(--vermilion)' }}>
-                                <SendOutlined /> 推送
+                                <SendOutlined /> {pushingReportId === record.id ? '推送中' : '推送'}
                               </a>
                             </Popconfirm>
                           )}
@@ -914,6 +1168,152 @@ const Dashboard: React.FC = () => {
         )}
       </div>
 
+      {/* 部门周报归档 */}
+      {reportSectionExpanded && (
+        <div className="dash-report dash-weekly-archive edl-rise edl-rise-3c" style={{ marginTop: 16 }}>
+          <div className="dash-report-bar">
+            <div className="dash-report-left">
+              <CalendarOutlined className="dash-report-icon" />
+              <div>
+                <div className="edl-eyebrow" style={{ marginBottom: 2 }}>部门周报归档</div>
+                <span style={{ fontSize: 13, color: 'var(--ink-faint)' }}>
+                  保存部门向公司提交的 HTML 周报，按周回看部门重点工作
+                  {departmentWeeklyTotal > 0 && <span className="edl-mono"> · 当前筛选 {departmentWeeklyTotal} 份</span>}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <div className="dash-report-history">
+            <div className="dash-weekly-form">
+              <DatePicker
+                picker="week"
+                value={departmentWeeklyWeek}
+                onChange={(date) => date && setDepartmentWeeklyWeek(getWeekMonday(date))}
+                allowClear={false}
+              />
+              <Input
+                value={departmentWeeklyDepartment}
+                onChange={(e) => setDepartmentWeeklyDepartment(e.target.value)}
+                onPressEnter={loadDepartmentWeeklyReports}
+                placeholder="部门名称，如：市场部"
+                maxLength={100}
+              />
+              <Input
+                value={departmentWeeklyTitle}
+                onChange={(e) => setDepartmentWeeklyTitle(e.target.value)}
+                placeholder="周报标题，可不填"
+                maxLength={200}
+              />
+              <Button icon={<ReloadOutlined />} onClick={loadDepartmentWeeklyReports}>
+                查看
+              </Button>
+              <Upload
+                accept=".html,.htm,text/html"
+                showUploadList={false}
+                beforeUpload={(file) => {
+                  void handleUploadDepartmentWeekly(file as File);
+                  return Upload.LIST_IGNORE;
+                }}
+              >
+                <Button
+                  type="primary"
+                  icon={<UploadOutlined />}
+                  loading={departmentWeeklyUploading}
+                  disabled={!canGenerateReports || departmentWeeklyUploading}
+                  title={!canGenerateReports ? '当前账号无周报归档权限' : undefined}
+                >
+                  上传HTML
+                </Button>
+              </Upload>
+            </div>
+
+            <Spin spinning={departmentWeeklyLoading}>
+              {departmentWeeklyReports.length === 0 && !departmentWeeklyLoading ? (
+                <Empty description="当前周暂无部门周报归档" style={{ padding: '16px 0' }} />
+              ) : (
+                <Table<DepartmentWeeklyReportItem>
+                  rowKey="id"
+                  size="small"
+                  scroll={{ x: 760 }}
+                  columns={[
+                    {
+                      title: '周报',
+                      dataIndex: 'title',
+                      ellipsis: true,
+                      render: (text: string, record: DepartmentWeeklyReportItem) => (
+                        <div className="dash-weekly-title">
+                          <strong>{text || record.file_name}</strong>
+                          <span>{record.file_name}</span>
+                        </div>
+                      ),
+                    },
+                    {
+                      title: '周期',
+                      dataIndex: 'week_start',
+                      width: 170,
+                      render: (_: string, record: DepartmentWeeklyReportItem) => (
+                        <span className="edl-mono" style={{ fontSize: 12 }}>
+                          {dayjs(record.week_start).format('MM.DD')} - {dayjs(record.week_end).format('MM.DD')}
+                        </span>
+                      ),
+                    },
+                    {
+                      title: '部门',
+                      dataIndex: 'department',
+                      width: 120,
+                      render: (text: string) => <Tag style={{ margin: 0 }}>{text}</Tag>,
+                    },
+                    {
+                      title: '大小',
+                      dataIndex: 'content_length',
+                      width: 88,
+                      render: (value: number) => <span className="edl-mono">{formatFileSize(value)}</span>,
+                    },
+                    {
+                      title: '归档人',
+                      dataIndex: 'uploaded_by',
+                      width: 110,
+                      render: (text: string) => text || '—',
+                    },
+                    {
+                      title: '操作',
+                      key: 'action',
+                      width: 150,
+                      render: (_: unknown, record: DepartmentWeeklyReportItem) => (
+                        <Space size={10}>
+                          <a className="dash-rpt-link" onClick={() => handlePreviewDepartmentWeekly(record.id)}>
+                            <EyeOutlined /> 预览
+                          </a>
+                          {canGenerateReports ? (
+                            <Popconfirm
+                              title="删除这份部门周报？"
+                              description="删除后不会出现在归档列表中"
+                              onConfirm={() => handleDeleteDepartmentWeekly(record.id)}
+                              okText="删除"
+                              cancelText="取消"
+                            >
+                              <a className="dash-rpt-link" style={{ color: 'var(--vermilion)' }}>
+                                <DeleteOutlined /> 删除
+                              </a>
+                            </Popconfirm>
+                          ) : (
+                            <span style={{ color: 'var(--ink-faint)', fontSize: 12 }}>无删除权限</span>
+                          )}
+                        </Space>
+                      ),
+                    },
+                  ]}
+                  dataSource={departmentWeeklyReports}
+                  pagination={false}
+                  locale={{ emptyText: <Empty description="当前周暂无部门周报归档" /> }}
+                />
+              )}
+            </Spin>
+          </div>
+        </div>
+      )}
+
       {/* 每日速递推送区 */}
       {reportSectionExpanded && (
         <div className="dash-report edl-rise edl-rise-3c" style={{ marginTop: 16 }}>
@@ -930,6 +1330,8 @@ const Dashboard: React.FC = () => {
             <Button
               icon={<PlusOutlined />}
               loading={generatingExpress}
+              disabled={!canGenerateReports}
+              title={!canGenerateReports ? '当前账号无速递生成权限' : undefined}
               onClick={handleGenerateExpress}
               size="small"
             >
@@ -998,13 +1400,17 @@ const Dashboard: React.FC = () => {
                         <Space size={8}>
                           <a
                             className="dash-rpt-link"
-                            onClick={() => window.open(window.location.origin + `/re/${record.id}`, '_blank')}
+                            onClick={() => handlePreviewExpress(record.id)}
                           >
                             <EyeOutlined /> 预览
                           </a>
                           {record.push_status === 'pushed' ? (
                             <span style={{ color: 'var(--ink-faint)', fontSize: 12 }}>
                               <CheckCircleOutlined /> 已推送
+                            </span>
+                          ) : !canGenerateReports ? (
+                            <span style={{ color: 'var(--ink-faint)', fontSize: 12 }}>
+                              无推送权限
                             </span>
                           ) : (
                             <Popconfirm
@@ -1015,7 +1421,7 @@ const Dashboard: React.FC = () => {
                               cancelText="取消"
                             >
                               <a className="dash-rpt-link" style={{ color: 'var(--vermilion)' }}>
-                                <SendOutlined /> 推送
+                                <SendOutlined /> {pushingExpressId === record.id ? '推送中' : '推送'}
                               </a>
                             </Popconfirm>
                           )}
@@ -1042,16 +1448,35 @@ const Dashboard: React.FC = () => {
               <div>
                 <div className="edl-eyebrow" style={{ marginBottom: 2 }}>标讯速递</div>
                 <span style={{ fontSize: 13, color: 'var(--ink-faint)' }}>
-                  剑鱼标讯 API 数据整合，按类型分组 + 高金额/重点匹配置顶
-                  {biddingExpress?.total && <span className="edl-mono"> · {biddingExpress.total} 条</span>}
+                  结构化标讯数据整合，按类型分组 + 高金额/重点匹配置顶
+                  {biddingExpress?.period_label && <span className="edl-mono"> · {biddingExpress.period_label}</span>}
+                  {biddingExpress?.total != null && <span className="edl-mono"> · 命中 {biddingExpress.total} 条</span>}
                 </span>
               </div>
             </div>
             <Space size={8}>
-              <Button icon={<ReloadOutlined />} loading={generatingBidding} onClick={handleGenerateBidding} size="small">
+              <Segmented
+                size="small"
+                value={biddingPeriod}
+                onChange={(value) => setBiddingPeriod(value as 'day' | 'week' | 'month' | 'all')}
+                options={[
+                  { label: '今日', value: 'day' },
+                  { label: '本周', value: 'week' },
+                  { label: '本月', value: 'month' },
+                  { label: '全部', value: 'all' },
+                ]}
+              />
+              <Button
+                icon={<ReloadOutlined />}
+                loading={generatingBidding}
+                disabled={!canManageExpress}
+                title={!canManageExpress ? '当前账号无标讯速递生成权限' : undefined}
+                onClick={handleGenerateBidding}
+                size="small"
+              >
                 生成标讯速递
               </Button>
-              {biddingExpress?.status === 'ok' && (
+              {biddingExpress?.status === 'ok' && canManageExpress && (
                 <Popconfirm
                   title="确定推送标讯速递到钉钉群？"
                   description={`将推送 ${biddingExpress.total} 条标讯，按类型分组展示`}
@@ -1065,7 +1490,7 @@ const Dashboard: React.FC = () => {
                 </Popconfirm>
               )}
               {biddingExpress?.status === 'ok' && (
-                <Button size="small" onClick={() => window.open('/bidding-express/preview', '_blank')}>
+                <Button size="small" onClick={handlePreviewBidding}>
                   预览
                 </Button>
               )}
@@ -1078,11 +1503,12 @@ const Dashboard: React.FC = () => {
               ))}
               {biddingExpress.high_value_count ? <Tag color="orange" style={{ fontSize: 11 }}>💰 高金额 {biddingExpress.high_value_count}</Tag> : null}
               {biddingExpress.priority_count ? <Tag color="red" style={{ fontSize: 11 }}>🎯 重点匹配 {biddingExpress.priority_count}</Tag> : null}
+              {biddingExpress.source_total != null ? <Tag style={{ fontSize: 11 }}>来源返回 {biddingExpress.source_total}</Tag> : null}
             </div>
           )}
           {biddingExpress?.status === 'empty' && (
             <div style={{ padding: '12px 16px', fontSize: 13, color: 'var(--ink-faint)' }}>
-              点击「生成标讯速递」从剑鱼 API 拉取并整合数据
+              当前周期暂无命中标讯，可切换到本月或全部查看历史数据
             </div>
           )}
         </div>
@@ -1115,6 +1541,7 @@ const Dashboard: React.FC = () => {
               columns={columns}
               dataSource={activities}
               className="edl-table"
+              scroll={{ x: 660 }}
               pagination={{ pageSize: 20, showSizeChanger: false }}
               locale={{ emptyText: <Empty description="本期暂无营销动作" /> }}
             />
@@ -1246,10 +1673,19 @@ const Dashboard: React.FC = () => {
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 12 }}>
           <Button onClick={() => setNoteDialogVisible(false)}>取消</Button>
-          <Button onClick={() => handleGenerateConfirm(false)} loading={generating !== null}>
+          <Button
+            onClick={() => handleGenerateConfirm(false)}
+            loading={generating !== null}
+            disabled={!canGenerateReports}
+          >
             仅生成
           </Button>
-          <Button type="primary" onClick={() => handleGenerateConfirm(true)} loading={generating !== null}>
+          <Button
+            type="primary"
+            onClick={() => handleGenerateConfirm(true)}
+            loading={generating !== null}
+            disabled={!canGenerateReports}
+          >
             生成并推送
           </Button>
         </div>
@@ -1302,12 +1738,52 @@ const Dashboard: React.FC = () => {
         <Spin spinning={previewLoading}>
           {previewDetail?.html_content ? (
             <iframe
-              srcDoc={previewDetail.html_content}
+              srcDoc={sanitizeHtmlForPreview(previewDetail.html_content)}
+              sandbox=""
               className="dash-preview-iframe"
               title="报告预览"
             />
           ) : (
             !previewLoading && <Empty description="暂无内容" />
+          )}
+        </Spin>
+      </Modal>
+
+      {/* 部门周报预览 */}
+      <Modal
+        open={departmentWeeklyPreviewVisible}
+        onCancel={() => setDepartmentWeeklyPreviewVisible(false)}
+        footer={null}
+        width={900}
+        title={
+          departmentWeeklyPreview ? (
+            <div className="dash-preview-header">
+              <span style={{ fontFamily: 'var(--serif)', fontWeight: 700, flex: 1 }}>
+                {departmentWeeklyPreview.title}
+              </span>
+              <Space size={8} wrap>
+                <Tag>{departmentWeeklyPreview.department}</Tag>
+                <Tag>
+                  {dayjs(departmentWeeklyPreview.week_start).format('MM.DD')} - {dayjs(departmentWeeklyPreview.week_end).format('MM.DD')}
+                </Tag>
+              </Space>
+            </div>
+          ) : (
+            '部门周报预览'
+          )
+        }
+        className="dash-preview-modal"
+      >
+        <Spin spinning={departmentWeeklyPreviewLoading}>
+          {departmentWeeklyPreview?.html_content ? (
+            <iframe
+              srcDoc={sanitizeHtmlForPreview(departmentWeeklyPreview.html_content)}
+              sandbox=""
+              className="dash-preview-iframe"
+              title="部门周报预览"
+            />
+          ) : (
+            !departmentWeeklyPreviewLoading && <Empty description="暂无内容" />
           )}
         </Spin>
       </Modal>

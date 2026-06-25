@@ -1,22 +1,22 @@
 /* ============================================================
-   营销数据驾驶舱 · Editorial 视觉系统
-   - 暖米白底 + 朱砂红 + 墨色
+   Market 数据采集中心 · Editorial 视觉系统
+   - 运营工作台底色 + 朱砂红 + 墨色
    - 衬线显示字体（Noto Serif SC / DM Serif Display）+ 等宽数字
    字体通过系统自带回退，无需外部加载
    ============================================================ */
 
 :root {
-  --ink: #1a1714;
-  --ink-soft: #3b342d;
-  --ink-faint: #7a6f62;
-  --paper: #f5efe3;
-  --paper-light: #faf6ec;
-  --paper-deep: #ece3cf;
-  --rule: #2a2520;
-  --vermilion: #c53a2c;
-  --vermilion-deep: #9e2d22;
-  --jade: #3f7a4a;
-  --gold: #a37a1f;
+  --ink: #111827;
+  --ink-soft: #374151;
+  --ink-faint: #6b7280;
+  --paper: #f6f7f9;
+  --paper-light: #ffffff;
+  --paper-deep: #e5e7eb;
+  --rule: #111827;
+  --vermilion: #b42318;
+  --vermilion-deep: #8f1d13;
+  --jade: #13795b;
+  --gold: #9a6700;
 
   --serif: 'Noto Serif SC', 'STSong', 'SimSun', serif;
   --display: 'DM Serif Display', 'Noto Serif SC', serif;
@@ -38,20 +38,11 @@ body,
 }
 
 body {
-  background-image:
-    radial-gradient(circle at 18% 22%, rgba(197, 58, 44, 0.05), transparent 42%),
-    radial-gradient(circle at 82% 78%, rgba(63, 122, 74, 0.04), transparent 48%);
+  background: var(--paper);
 }
 
-/* 噪点纸纹 —— 用极细 SVG 给整面背景一点呼吸 */
 body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 0;
-  opacity: 0.35;
-  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.10  0 0 0 0 0.09  0 0 0 0 0.08  0 0 0 0.07 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  display: none;
 }
 
 /* —— 排版锚 —— */
@@ -123,28 +114,14 @@ body::before {
 .edl-card {
   background: var(--paper-light);
   border: 1px solid rgba(26, 23, 20, 0.12);
-  border-radius: 0;
+  border-radius: 8px;
   position: relative;
 }
 .edl-card::before {
-  content: '';
-  position: absolute;
-  top: -1px;
-  left: -1px;
-  width: 14px;
-  height: 14px;
-  border-top: 2px solid var(--ink);
-  border-left: 2px solid var(--ink);
+  display: none;
 }
 .edl-card::after {
-  content: '';
-  position: absolute;
-  bottom: -1px;
-  right: -1px;
-  width: 14px;
-  height: 14px;
-  border-bottom: 2px solid var(--ink);
-  border-right: 2px solid var(--ink);
+  display: none;
 }
 
 .edl-stat-num {

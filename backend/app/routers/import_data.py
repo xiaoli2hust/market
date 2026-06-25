@@ -7,7 +7,7 @@
 4. 调用通义千问解析为结构化活动并落 ``activities`` 表；
 5. 解析失败不阻塞文件落库，状态写入 parse_status / error_message。
 
-接口受 ``verify_api_key`` 保护，期望 Header：``Authorization: Bearer <UPLOAD_API_KEY>``。
+接口受 ``verify_api_key`` 保护，期望 Header：``Authorization: Bearer <管理中心生成的 API Key>``。
 """
 
 from __future__ import annotations
@@ -156,6 +156,14 @@ async def import_chat_json(
     # 2. staff 查找/创建
     staff = await _get_or_create_staff(db, request.user_name)
 
+    # 同一员工同一天的日报事实只能以最后一次导入结果为准。
+    await db.execute(
+        delete(Activity).where(
+            Activity.staff_id == staff.id,
+            Activity.report_date == file_date,
+        )
+    )
+
     # 3. 拼接日报原文
     report_text = _build_report_text(request)
 
@@ -175,6 +183,7 @@ async def import_chat_json(
             activities = await parse_daily_report(
                 user_name=request.user_name,
                 report_text=report_text,
+                db=db,
             )
         except Exception as exc:  # noqa: BLE001 - LLM 服务已内部兜底，这里再加一道保险
             logger.exception("LLM 解析异常：%s", exc)
@@ -182,16 +191,7 @@ async def import_chat_json(
             parse_status = "failed"
             error_message = f"llm error: {exc}"
 
-        # 5. 清理同一 staff+date 的旧 activities，避免重复
         if activities:
-            await db.execute(
-                delete(Activity).where(
-                    Activity.staff_id == staff.id,
-                    Activity.report_date == file_date,
-                    Activity.source_file_id == report_file.id,
-                )
-            )
-
             for item in activities:
                 db.add(
                     Activity(

@@ -1,407 +1,340 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  Button,
   Card,
   Col,
   Empty,
   Row,
+  Segmented,
   Space,
   Table,
-  Tabs,
   Tag,
   Typography,
+  message,
 } from 'antd';
+import type { ColumnsType } from 'antd/es/table';
 import {
-  DollarOutlined,
-  RiseOutlined,
+  AlertOutlined,
+  ArrowRightOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
+  CommentOutlined,
+  DatabaseOutlined,
+  FileSearchOutlined,
+  LinkOutlined,
+  ReloadOutlined,
+  RiseOutlined,
+  RobotOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
+import { history } from '@@/exports';
+import {
+  ActivityItem,
+  fetchActivities,
+  fetchOpportunityLeads,
+  fetchOpportunityLeadStats,
+  OpportunityLead,
+  OpportunityLeadStats,
+} from '@/services/api';
 import './opportunities.less';
 
 const { Title } = Typography;
 
-// ---------- Mock 数据 ----------
+type WorkbenchMode = 'follow' | 'sign' | 'payment';
 
-interface OpportunityForecast {
-  id: number;
-  opportunity_name: string;
-  customer_name: string;
-  owner_name: string;
-  department: string;
-  forecast_amount: number;
-  forecast_date: string;
-  stage: string;
-  confidence: number;
-  last_confirmed_at: string;
-  notes: string;
-}
+const modeFilter: Record<WorkbenchMode, RegExp> = {
+  follow: /商机|客户|拜访|方案|POC|项目推进|招投标|合同|回款/,
+  sign: /商机|招投标|投标|合同|方案|POC|项目推进/,
+  payment: /回款|验收|合同|付款|到账|发票/,
+};
 
-const MOCK_SIGN_DATA: OpportunityForecast[] = [
+const gapItems = [
   {
-    id: 1,
-    opportunity_name: '智慧警务地理信息平台三期',
-    customer_name: '北京市公安局',
-    owner_name: '张伟',
-    department: '华北组',
-    forecast_amount: 580,
-    forecast_date: '2026-07-15',
-    stage: '方案评审',
-    confidence: 0.85,
-    last_confirmed_at: '2026-06-10',
-    notes: '已完成技术方案评审，等待客户内部立项审批',
+    title: '商机主数据',
+    status: '需契约',
+    text: '需要销售侧提供商机编号、客户、负责人、阶段、预计签单与更新时间。',
   },
   {
-    id: 2,
-    opportunity_name: '城市运行管理大数据平台',
-    customer_name: '上海市住建委',
-    owner_name: '李明',
-    department: '华东组',
-    forecast_amount: 420,
-    forecast_date: '2026-08-01',
-    stage: '招投标',
-    confidence: 0.7,
-    last_confirmed_at: '2026-06-08',
-    notes: '已购买标书，正在准备投标材料',
+    title: '销售追问记录',
+    status: '需契约',
+    text: '需要销售侧提供机器人追问结果；平台只跟进进度，不替销售生成预测。',
   },
   {
-    id: 3,
-    opportunity_name: '数字孪生水务系统',
-    customer_name: '深圳水务集团',
-    owner_name: '王芳',
-    department: '行业组',
-    forecast_amount: 350,
-    forecast_date: '2026-06-30',
-    stage: '合同谈判',
-    confidence: 0.9,
-    last_confirmed_at: '2026-06-12',
-    notes: '合同条款基本达成一致，本周内预计签约',
+    title: '签单预测回传',
+    status: '需契约',
+    text: '需要销售侧提供已确认的签单预测金额、日期、置信度和变更原因。',
   },
   {
-    id: 4,
-    opportunity_name: '智慧交通数据中台',
-    customer_name: '广州市交研院',
-    owner_name: '陈杰',
-    department: '行业组',
-    forecast_amount: 280,
-    forecast_date: '2026-09-15',
-    stage: '需求确认',
-    confidence: 0.5,
-    last_confirmed_at: '2026-06-05',
-    notes: '初步接触，客户有预算但需求尚不明确',
-  },
-  {
-    id: 5,
-    opportunity_name: '政务大数据治理平台',
-    customer_name: '成都市政数局',
-    owner_name: '赵强',
-    department: '华北组',
-    forecast_amount: 650,
-    forecast_date: '2026-07-30',
-    stage: 'POC验证',
-    confidence: 0.75,
-    last_confirmed_at: '2026-06-11',
-    notes: 'POC环境已部署完成，下周进行演示汇报',
+    title: '回款计划与事实',
+    status: '需契约',
+    text: '需要合同侧提供回款计划、开票、验收和到账事实，避免用页面推测金额。',
   },
 ];
 
-const MOCK_PAYMENT_DATA: OpportunityForecast[] = [
-  {
-    id: 101,
-    opportunity_name: '智慧城市一期（尾款）',
-    customer_name: '杭州市城管局',
-    owner_name: '张伟',
-    department: '华北组',
-    forecast_amount: 180,
-    forecast_date: '2026-06-25',
-    stage: '验收完成',
-    confidence: 0.95,
-    last_confirmed_at: '2026-06-12',
-    notes: '验收报告已签署，等待财务走付款流程',
-  },
-  {
-    id: 102,
-    opportunity_name: '数据治理平台（首付款）',
-    customer_name: '南京市信息中心',
-    owner_name: '李明',
-    department: '华东组',
-    forecast_amount: 120,
-    forecast_date: '2026-06-20',
-    stage: '已签约',
-    confidence: 0.9,
-    last_confirmed_at: '2026-06-09',
-    notes: '合同已签署，首付款发票已开具',
-  },
-  {
-    id: 103,
-    opportunity_name: '交通大数据项目（阶段款）',
-    customer_name: '武汉交通委',
-    owner_name: '王芳',
-    department: '行业组',
-    forecast_amount: 240,
-    forecast_date: '2026-07-10',
-    stage: '项目交付',
-    confidence: 0.8,
-    last_confirmed_at: '2026-06-07',
-    notes: '第二阶段交付物已提交，等待验收确认',
-  },
-  {
-    id: 104,
-    opportunity_name: '应急指挥平台（终验款）',
-    customer_name: '重庆市应急局',
-    owner_name: '陈杰',
-    department: '行业组',
-    forecast_amount: 95,
-    forecast_date: '2026-08-15',
-    stage: '终验中',
-    confidence: 0.6,
-    last_confirmed_at: '2026-06-06',
-    notes: '终验进行中，客户反馈需要补充部分材料',
-  },
-];
+const formatBudget = (value?: number | null) => {
+  if (!value) return '未披露';
+  if (value >= 100000000) return `${(value / 100000000).toFixed(2)}亿`;
+  return `${(value / 10000).toFixed(1)}万`;
+};
 
-// ---------- 组件 ----------
-
-const STAGE_COLORS: Record<string, string> = {
-  需求确认: 'default',
-  方案评审: 'processing',
-  招投标: 'blue',
-  POC验证: 'cyan',
-  合同谈判: 'orange',
-  已签约: 'green',
-  项目交付: 'purple',
-  验收完成: 'green',
-  终验中: 'orange',
+const isOpportunityActivity = (item: ActivityItem) => {
+  const text = [
+    item.action_type,
+    item.action_type_label,
+    item.opportunity_name,
+    item.customer_name,
+    item.summary,
+    item.detail,
+  ].join(' ');
+  return Boolean(item.opportunity_id || item.opportunity_name || modeFilter.follow.test(text));
 };
 
 const Opportunities: React.FC = () => {
-  const [tab, setTab] = useState<string>('sign');
+  const [mode, setMode] = useState<WorkbenchMode>('follow');
+  const [loading, setLoading] = useState(false);
+  const [activities, setActivities] = useState<ActivityItem[]>([]);
+  const [convertedLeads, setConvertedLeads] = useState<OpportunityLead[]>([]);
+  const [leadStats, setLeadStats] = useState<OpportunityLeadStats | null>(null);
 
-  const currentData = tab === 'sign' ? MOCK_SIGN_DATA : MOCK_PAYMENT_DATA;
+  const load = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [activityResp, leadsResp, statsResp] = await Promise.all([
+        fetchActivities({ page: 1, page_size: 150 }),
+        fetchOpportunityLeads({ status: 'converted', page: 1, page_size: 8 }).catch(() => ({ items: [] })),
+        fetchOpportunityLeadStats().catch(() => null),
+      ]);
+      setActivities(activityResp.list || []);
+      setConvertedLeads(leadsResp.items || []);
+      setLeadStats(statsResp);
+    } catch (err: any) {
+      message.error(err?.message || '商机数据加载失败');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
-  // 汇总计算
-  const totalAmount = currentData.reduce((sum, d) => sum + d.forecast_amount, 0);
-  const thisMonthAmount = currentData
-    .filter((d) => dayjs(d.forecast_date).month() === dayjs().month())
-    .reduce((sum, d) => sum + d.forecast_amount, 0);
-  const avgConfidence =
-    currentData.length > 0
-      ? currentData.reduce((sum, d) => sum + d.confidence, 0) / currentData.length
-      : 0;
-  const highConfidenceCount = currentData.filter((d) => d.confidence >= 0.8).length;
+  useEffect(() => {
+    load();
+  }, [load]);
 
-  const columns = [
+  const opportunityActivities = useMemo(
+    () => activities.filter(isOpportunityActivity),
+    [activities],
+  );
+
+  const tableData = useMemo(() => {
+    const filter = modeFilter[mode];
+    return opportunityActivities
+      .filter((item) => filter.test([
+        item.action_type,
+        item.opportunity_name,
+        item.customer_name,
+        item.summary,
+      ].join(' ')))
+      .slice(0, 60);
+  }, [mode, opportunityActivities]);
+
+  const riskActivities = useMemo(
+    () => opportunityActivities.filter((item) => /风险|延期|延迟|逾期|未确认|待确认|介入|阻塞|回款/.test(item.summary || item.detail || '')).slice(0, 12),
+    [opportunityActivities],
+  );
+
+  const connectedEvidenceCount = [
+    opportunityActivities.length > 0,
+    convertedLeads.length > 0,
+  ].filter(Boolean).length;
+
+  const columns: ColumnsType<ActivityItem> = [
     {
-      title: tab === 'sign' ? '商机名称' : '项目/款项',
+      title: '商机 / 客户',
       dataIndex: 'opportunity_name',
-      ellipsis: true,
-      render: (text: string) => (
-        <span style={{ fontFamily: 'var(--serif)', fontWeight: 600 }}>{text}</span>
+      render: (_, record) => (
+        <div className="opp-name">
+          <div className="opp-main">{record.opportunity_name || record.customer_name || '未命名商机'}</div>
+          <div className="opp-meta">
+            <span>{record.customer_name || '客户未标注'}</span>
+            <span>{record.user_name || '负责人未标注'} · {record.user_department || '部门未标注'}</span>
+          </div>
+        </div>
       ),
     },
     {
-      title: '客户',
-      dataIndex: 'customer_name',
-      width: 150,
-    },
-    {
-      title: '负责人',
-      dataIndex: 'owner_name',
-      width: 90,
-      render: (name: string, record: OpportunityForecast) => (
-        <span>
-          {name}
-          <span style={{ fontSize: 11, color: 'var(--ink-faint)', marginLeft: 4 }}>
-            {record.department}
+      title: '最近动作',
+      dataIndex: 'summary',
+      render: (_, record) => (
+        <div className="opp-question">
+          <RobotOutlined />
+          <span>
+            <Tag>{record.action_type_label || record.action_type || '活动'}</Tag>
+            {record.summary || record.detail || '无摘要'}
           </span>
-        </span>
+        </div>
       ),
     },
     {
-      title: tab === 'sign' ? '预测签单额' : '预测回款额',
-      dataIndex: 'forecast_amount',
-      width: 120,
-      sorter: (a: OpportunityForecast, b: OpportunityForecast) => a.forecast_amount - b.forecast_amount,
-      render: (amount: number) => (
-        <span className="opp-amount edl-mono">
-          {amount}<span className="opp-amount-unit">万</span>
-        </span>
-      ),
+      title: '日期',
+      dataIndex: 'activity_date',
+      width: 118,
+      render: (value: string) => <span className="opp-date edl-mono">{value ? dayjs(value).format('YYYY.MM.DD') : '—'}</span>,
     },
     {
-      title: tab === 'sign' ? '预计签单日期' : '预计回款日期',
-      dataIndex: 'forecast_date',
-      width: 120,
-      sorter: (a: OpportunityForecast, b: OpportunityForecast) =>
-        dayjs(a.forecast_date).valueOf() - dayjs(b.forecast_date).valueOf(),
-      render: (date: string) => (
-        <span className="edl-mono" style={{ fontSize: 12 }}>
-          {dayjs(date).format('YYYY·MM·DD')}
-        </span>
-      ),
-    },
-    {
-      title: '阶段',
-      dataIndex: 'stage',
-      width: 100,
-      render: (stage: string) => (
-        <Tag color={STAGE_COLORS[stage] || 'default'} style={{ margin: 0 }}>
-          {stage}
-        </Tag>
-      ),
-    },
-    {
-      title: '置信度',
-      dataIndex: 'confidence',
-      width: 80,
-      sorter: (a: OpportunityForecast, b: OpportunityForecast) => a.confidence - b.confidence,
-      render: (val: number) => (
-        <span
-          style={{
-            fontFamily: 'var(--mono)',
-            color: val >= 0.8 ? '#52c41a' : val >= 0.6 ? '#faad14' : '#ff4d4f',
-            fontWeight: 600,
-          }}
-        >
-          {Math.round(val * 100)}%
-        </span>
-      ),
-    },
-    {
-      title: '备注',
-      dataIndex: 'notes',
-      ellipsis: true,
-      render: (text: string) => (
-        <span style={{ fontSize: 12, color: 'var(--ink-faint)' }}>{text || '—'}</span>
-      ),
-    },
-    {
-      title: '最近确认',
-      dataIndex: 'last_confirmed_at',
-      width: 100,
-      render: (date: string) => (
-        <span className="edl-mono" style={{ fontSize: 11, color: 'var(--ink-faint)' }}>
-          {dayjs(date).format('MM·DD')}
-        </span>
-      ),
+      title: '证据',
+      dataIndex: 'source',
+      width: 112,
+      render: () => <Tag color="blue">日报活动</Tag>,
     },
   ];
 
   return (
-    <div className="opp">
-      {/* Headline */}
+    <div className="opp-center">
       <div className="opp-headline edl-rise edl-rise-1">
         <div>
-          <div className="edl-eyebrow">Business Pipeline · 商机管线</div>
+          <div className="edl-eyebrow">Opportunity Workbench · 商机中心</div>
           <Title className="opp-title" level={1}>
-            商机<span className="accent">数据</span>
+            商机<span className="accent">跟进台</span>
           </Title>
-          <div className="opp-sub">
-            签单预测 · 回款预测 · 进展追踪
-            <span className="edl-mono"> · 机器人定期与销售确认更新</span>
-          </div>
+          <div className="opp-sub">已接入日报商机动作与标讯确认线索；签单、回款、销售追问等待销售侧机制接入</div>
         </div>
+        <Space wrap>
+          <Button icon={<FileSearchOutlined />} onClick={() => history.push('/intelligence/opportunities')}>
+            标讯线索确认
+          </Button>
+          <Button icon={<ReloadOutlined />} onClick={load} loading={loading}>
+            刷新
+          </Button>
+        </Space>
       </div>
 
       <hr className="edl-rule-strong" />
 
-      {/* Summary stats */}
-      <div className="opp-stats edl-rise edl-rise-2">
-        <Row gutter={[16, 16]}>
-          <Col xs={12} md={6}>
-            <Card className="opp-stat-card" bordered={false}>
-              <div className="opp-stat-label">
-                <DollarOutlined /> {tab === 'sign' ? '预测签单总额' : '预测回款总额'}
-              </div>
-              <div className="opp-stat-value">
-                <span className="edl-display">{totalAmount}</span>
-                <span className="opp-stat-unit">万元</span>
-              </div>
-            </Card>
-          </Col>
-          <Col xs={12} md={6}>
-            <Card className="opp-stat-card" bordered={false}>
-              <div className="opp-stat-label">
-                <ClockCircleOutlined /> 本月预期
-              </div>
-              <div className="opp-stat-value">
-                <span className="edl-display">{thisMonthAmount}</span>
-                <span className="opp-stat-unit">万元</span>
-              </div>
-            </Card>
-          </Col>
-          <Col xs={12} md={6}>
-            <Card className="opp-stat-card" bordered={false}>
-              <div className="opp-stat-label">
-                <RiseOutlined /> 平均置信度
-              </div>
-              <div className="opp-stat-value">
-                <span className="edl-display" style={{ color: avgConfidence >= 0.8 ? '#52c41a' : '#faad14' }}>
-                  {Math.round(avgConfidence * 100)}
-                </span>
-                <span className="opp-stat-unit">%</span>
-              </div>
-            </Card>
-          </Col>
-          <Col xs={12} md={6}>
-            <Card className="opp-stat-card" bordered={false}>
-              <div className="opp-stat-label">
-                <CheckCircleOutlined /> 高置信商机
-              </div>
-              <div className="opp-stat-value">
-                <span className="edl-display">{highConfidenceCount}</span>
-                <span className="opp-stat-unit">个</span>
-              </div>
-            </Card>
-          </Col>
-        </Row>
+      <Row className="opp-stats edl-rise edl-rise-2" gutter={[16, 16]}>
+        <Col xs={12} md={6}>
+          <Card className="opp-stat-card" variant="borderless">
+            <div className="opp-stat-label"><CheckCircleOutlined /> 已确认线索</div>
+            <div className="opp-stat-value"><span className="edl-display">{leadStats?.by_status?.converted || convertedLeads.length}</span><span>条</span></div>
+          </Card>
+        </Col>
+        <Col xs={12} md={6}>
+          <Card className="opp-stat-card" variant="borderless">
+            <div className="opp-stat-label"><CommentOutlined /> 商机活动</div>
+            <div className="opp-stat-value"><span className="edl-display">{opportunityActivities.length}</span><span>条</span></div>
+          </Card>
+        </Col>
+        <Col xs={12} md={6}>
+          <Card className="opp-stat-card" variant="borderless">
+            <div className="opp-stat-label"><AlertOutlined /> 待关注</div>
+            <div className="opp-stat-value"><span className="edl-display">{riskActivities.length}</span><span>项</span></div>
+          </Card>
+        </Col>
+        <Col xs={12} md={6}>
+          <Card className="opp-stat-card" variant="borderless">
+            <div className="opp-stat-label"><DatabaseOutlined /> 已接入证据源</div>
+            <div className="opp-stat-value"><span className="edl-display">{connectedEvidenceCount}</span><span>类</span></div>
+          </Card>
+        </Col>
+      </Row>
+
+      <div className="opp-loop edl-rise edl-rise-2">
+        {[
+          { icon: <CommentOutlined />, label: '日报活动证据', value: opportunityActivities.length, unit: '条', status: '已接入' },
+          { icon: <FileSearchOutlined />, label: '标讯确认线索', value: convertedLeads.length, unit: '条', status: '已接入' },
+          { icon: <RobotOutlined />, label: '销售侧商机机制', value: gapItems.length, unit: '项契约待补', status: '需业务确认' },
+        ].map((step, index) => (
+          <div className="opp-loop-step" key={step.label}>
+            <div className="opp-loop-icon">{step.icon}</div>
+            <div>
+              <div className="opp-loop-label">{step.label}</div>
+              <div className="opp-loop-value"><span>{step.value}</span>{step.unit}</div>
+              <Tag color={step.status === '已接入' ? 'green' : 'orange'}>{step.status}</Tag>
+            </div>
+            {index < 2 && <ArrowRightOutlined className="opp-loop-arrow" />}
+          </div>
+        ))}
       </div>
 
-      {/* Tabs */}
-      <div className="opp-feed edl-rise edl-rise-3">
-        <Tabs
-          activeKey={tab}
-          onChange={setTab}
-          items={[
-            {
-              key: 'sign',
-              label: (
-                <span>
-                  <DollarOutlined /> 签单预测
-                  <Tag color="blue" style={{ marginLeft: 6, fontSize: 10 }}>
-                    {MOCK_SIGN_DATA.length}
-                  </Tag>
-                </span>
-              ),
-            },
-            {
-              key: 'payment',
-              label: (
-                <span>
-                  <CheckCircleOutlined /> 回款预测
-                  <Tag color="green" style={{ marginLeft: 6, fontSize: 10 }}>
-                    {MOCK_PAYMENT_DATA.length}
-                  </Tag>
-                </span>
-              ),
-            },
-          ]}
-        />
+      <Row className="opp-work edl-rise edl-rise-3" gutter={[16, 16]}>
+        <Col xs={24} lg={10}>
+          <div className="opp-panel">
+            <div className="opp-panel-head">
+              <div>
+                <div className="edl-eyebrow">Confirmed Leads</div>
+                <h3>已确认标讯线索</h3>
+              </div>
+              <Button size="small" type="link" onClick={() => history.push('/intelligence/opportunities')}>
+                查看线索 <ArrowRightOutlined />
+              </Button>
+            </div>
+            <div className="opp-intake-list">
+              {convertedLeads.length === 0 ? (
+                <Empty description="暂无已确认线索" />
+              ) : convertedLeads.map((lead) => (
+                <div className="opp-intake" key={lead.id}>
+                  <div>
+                    <div className="opp-intake-title">{lead.project_name}</div>
+                    <div className="opp-intake-meta">
+                      <Tag color={lead.score >= 80 ? 'red' : 'orange'}>评分 {lead.score}</Tag>
+                      <span>{lead.buyer || '采购单位未披露'}</span>
+                      <span>{formatBudget(lead.budget)}</span>
+                    </div>
+                  </div>
+                  <Button size="small" icon={<LinkOutlined />} onClick={() => window.open(lead.url, '_blank', 'noopener,noreferrer')}>
+                    原文
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Col>
+        <Col xs={24} lg={14}>
+          <div className="opp-panel">
+            <div className="opp-panel-head">
+              <div>
+                <div className="edl-eyebrow">Readiness</div>
+                <h3>销售机制接入状态</h3>
+              </div>
+              <Tag color="orange">缺少销售侧契约</Tag>
+            </div>
+            <div className="opp-gap-list">
+              {gapItems.map((item) => (
+                <div className="opp-gap" key={item.title}>
+                  <Tag color="orange">{item.status}</Tag>
+                  <strong>{item.title}</strong>
+                  <span>{item.text}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </Col>
+      </Row>
 
+      <div className="opp-feed edl-rise edl-rise-4">
+        <div className="opp-feed-head">
+          <div>
+            <div className="edl-eyebrow">Evidence Feed</div>
+            <h3>已接入的商机跟进证据</h3>
+          </div>
+          <Segmented
+            value={mode}
+            onChange={(value) => setMode(value as WorkbenchMode)}
+            options={[
+              { value: 'follow', label: '跟进活动', icon: <RobotOutlined /> },
+              { value: 'sign', label: '签单相关', icon: <RiseOutlined /> },
+              { value: 'payment', label: '回款相关', icon: <CheckCircleOutlined /> },
+            ]}
+          />
+        </div>
         <Table
           rowKey="id"
           columns={columns}
-          dataSource={currentData}
-          size="middle"
+          dataSource={tableData}
+          loading={loading}
+          pagination={{ pageSize: 10 }}
           className="opp-table"
-          pagination={false}
-          locale={{ emptyText: <Empty description="暂无预测数据" /> }}
+          locale={{ emptyText: <Empty description="暂无已接入商机证据" /> }}
         />
-
         <div className="opp-foot-note">
-          <span className="edl-eyebrow">
-            数据来源：钉钉机器人定期与销售确认 · 最近一次更新 {dayjs().format('YYYY·MM·DD')}
-          </span>
+          <ClockCircleOutlined /> 当前页面只展示已有证据，不生成预测金额。
         </div>
       </div>
     </div>

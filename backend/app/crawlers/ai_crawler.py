@@ -1,4 +1,4 @@
-"""AI/Agent 资讯爬虫：采集 RSS + HTTP 源。
+"""行业知识爬虫：采集 AI Agent、空间数据和工程化知识源。
 
 支持两种采集模式：
 - RSS feed（稳定可靠，优先使用）
@@ -16,7 +16,8 @@ import feedparser
 from bs4 import BeautifulSoup
 
 from .base import BaseCrawler, CrawlResult
-from .config import AI_KEYWORDS, AI_SOURCES, CRAWLER_MAX_ITEMS_PER_SOURCE
+from .config import AI_KEYWORDS, AI_SOURCES, CRAWLER_MAX_ITEMS_PER_SOURCE, CRAWLER_MAX_ITEMS_PER_RUN
+from .intelligence_agent import build_intelligence_profile, contains_keyword, match_keywords
 
 logger = logging.getLogger(__name__)
 
@@ -30,16 +31,32 @@ CORE_KEYWORDS = [
     "大模型", "llm", "gpt", "claude", "gemini", "deepseek",
     # AI 通用
     "人工智能", "ai agent", "生成式ai", "aigc",
-    # 空间/GIS
-    "空间智能", "数字孪生", "cim", "实景三维", "geoai",
+    # 空间数据/GIS/地图
+    "空间智能", "空间数据", "地理空间数据", "空间数据治理",
+    "数字孪生", "cim", "实景三维", "geoai",
+    "gis", "地理信息", "测绘地理信息", "时空大数据", "时空智能",
+    "位置智能", "空间分析", "空间计算", "地图服务", "电子地图", "地图平台",
+    "osgeo", "gdal", "proj", "qgis", "postgis", "geoserver", "mapserver",
+    "openstreetmap", "osm", "geotools", "geotiff", "geopackage",
+    "stac", "geoparquet", "pmtiles", "vector tile", "矢量切片",
+    "cloud optimized geotiff", "cog",
+    "地址治理", "地址标准化", "地址解析", "标准地址", "地理编码",
+    "poi", "aoi", "遥感", "遥感影像", "点云", "lidar",
+    "高精地图", "国土空间", "自然资源一张图", "地理实体",
     # 公安/政务
     "智慧公安", "智慧警务", "情指行", "政数局", "数字政府", "一网通办",
     # 技术
     "rag", "mcp", "知识图谱", "向量数据库",
 ]
 
+SPATIAL_TRUSTED_SOURCE_KEYWORDS = [
+    "空间数据", "地理空间", "GIS", "地理信息", "地图", "时空", "空间分析",
+    "位置智能", "OpenStreetMap", "OSM", "OSGeo", "QGIS", "GeoServer",
+    "GeoTools", "PostGIS", "GDAL", "PROJ", "OGC", "STAC", "GeoParquet",
+    "GeoTIFF", "GeoPackage", "矢量切片", "Vector Tile", "PMTiles",
+]
 
-def _keyword_match(title: str, summary: str = "") -> tuple[list[str], float]:
+def _keyword_match(title: str, summary: str = "", source: dict | None = None) -> tuple[list[str], float]:
     """分层关键词匹配。返回 (命中的关键词列表, 相关度分数 0-100)。
 
     规则：
@@ -49,19 +66,25 @@ def _keyword_match(title: str, summary: str = "") -> tuple[list[str], float]:
     - 摘要匹配只做微量加分（每条 +3 分），不影响是否保留
     - 上限 100
     """
-    title_lower = title.lower()
-    summary_lower = summary.lower() if summary else ""
-
     # 标题核心词匹配（必须至少命中一个）
-    title_core_hits = [kw for kw in CORE_KEYWORDS if kw in title_lower]
+    title_core_hits = _dedupe_keywords(match_keywords(title, CORE_KEYWORDS))
     if not title_core_hits:
+        trusted_hits = _trusted_spatial_source_hits(title, summary, source)
+        if trusted_hits:
+            return trusted_hits[:5], min(45 + len(trusted_hits) * 5, 75)
         return [], 0
 
     # 标题加分词
-    title_bonus = [kw for kw in AI_KEYWORDS if kw not in CORE_KEYWORDS and kw.lower() in title_lower]
+    core_keys = {kw.lower() for kw in CORE_KEYWORDS}
+    title_bonus = _dedupe_keywords([
+        kw for kw in AI_KEYWORDS if kw.lower() not in core_keys and contains_keyword(title, kw)
+    ])
 
     # 摘要加分（只加分，不影响是否保留）
-    summary_bonus = [kw for kw in AI_KEYWORDS if kw.lower() in summary_lower] if summary_lower else []
+    title_hit_keys = {kw.lower() for kw in [*title_core_hits, *title_bonus]}
+    summary_bonus = _dedupe_keywords([
+        kw for kw in match_keywords(summary, AI_KEYWORDS) if kw.lower() not in title_hit_keys
+    ]) if summary else []
 
     score = min(
         len(title_core_hits) * 30
@@ -69,22 +92,53 @@ def _keyword_match(title: str, summary: str = "") -> tuple[list[str], float]:
         + len(summary_bonus) * 3,
         100,
     )
-    return title_core_hits + title_bonus, score
+    return _dedupe_keywords(title_core_hits + title_bonus), score
+
+
+def _trusted_spatial_source_hits(title: str, summary: str, source: dict | None) -> list[str]:
+    selectors = (source or {}).get("selectors") or {}
+    if selectors.get("knowledge_domain") != "spatial":
+        return []
+    source_text = " ".join([
+        str((source or {}).get("name") or ""),
+        str(selectors.get("scope") or ""),
+        str(title or ""),
+        str(summary or ""),
+    ])
+    return _dedupe_keywords([
+        keyword for keyword in SPATIAL_TRUSTED_SOURCE_KEYWORDS
+        if contains_keyword(source_text, keyword)
+    ])
+
+
+def _dedupe_keywords(keywords: list[str]) -> list[str]:
+    result = []
+    seen = set()
+    for keyword in keywords:
+        key = keyword.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(keyword)
+    return result
 
 
 class AICrawler(BaseCrawler):
-    """AI/Agent 资讯爬虫。"""
+    """行业知识爬虫。"""
 
     name = "ai"
     category = "ai"
 
+    def __init__(self, sources: list[dict] | None = None) -> None:
+        super().__init__()
+        self.sources = sources or AI_SOURCES
+
     async def crawl(self) -> list[CrawlResult]:
-        """爬取所有 AI 资讯源。"""
+        """爬取所有行业知识源。"""
 
         results: list[CrawlResult] = []
-        client = await self._get_client()
 
-        for source in AI_SOURCES:
+        for source in self.sources:
             try:
                 source_type = source.get("type", "http")
                 if source_type == "rss":
@@ -93,25 +147,41 @@ class AICrawler(BaseCrawler):
                     items = await self._crawl_http(source)
 
                 results.extend(items)
+                self.source_reports.append({
+                    "source_id": source.get("source_id"),
+                    "name": source.get("name"),
+                    "url": source.get("url"),
+                    "type": source_type,
+                    "crawl_policy": source.get("crawl_policy"),
+                    "status": "ok",
+                    "found": len(items),
+                    "compliance": "robots+rate_limit",
+                })
                 logger.info("[ai] %s: 获取 %d 条", source["name"], len(items))
             except Exception as e:
+                self.source_reports.append({
+                    "source_id": source.get("source_id"),
+                    "name": source.get("name"),
+                    "url": source.get("url"),
+                    "type": source.get("type", "http"),
+                    "crawl_policy": source.get("crawl_policy"),
+                    "status": "error",
+                    "found": 0,
+                    "error": str(e),
+                    "compliance": "robots+rate_limit",
+                })
                 logger.warning("[ai] %s 爬取失败: %s", source["name"], e)
 
-            if len(results) >= CRAWLER_MAX_ITEMS_PER_SOURCE * 2:
-                break
-
-        return results[:CRAWLER_MAX_ITEMS_PER_SOURCE * 2]
+        return results[:CRAWLER_MAX_ITEMS_PER_RUN]
 
     async def _crawl_rss(self, source: dict) -> list[CrawlResult]:
         """通过 RSS feed 采集。"""
 
-        client = await self._get_client()
         url = source["url"]
         name = source["name"]
 
-        resp = await client.get(url)
-        resp.raise_for_status()
-        feed = feedparser.parse(resp.text)
+        text = await self._safe_get_text(url, source_name=name, source_policy=source.get("crawl_policy"))
+        feed = feedparser.parse(text)
 
         results: list[CrawlResult] = []
         for entry in feed.entries[:CRAWLER_MAX_ITEMS_PER_SOURCE]:
@@ -121,7 +191,7 @@ class AICrawler(BaseCrawler):
 
             # 关键词过滤（标题必须命中核心词）
             summary_text = entry.get("summary", "")
-            matched_kw, score = _keyword_match(title, summary_text)
+            matched_kw, score = _keyword_match(title, summary_text, source)
             if not matched_kw:
                 continue
 
@@ -150,6 +220,20 @@ class AICrawler(BaseCrawler):
 
             # 子分类
             sub_category = self._classify_ai_topic(title + " " + (summary or ""))
+            extra_data = {
+                "matched_keywords": matched_kw[:5],
+                "sub_category": sub_category,
+                "source_type": "rss",
+                "agent_profile": build_intelligence_profile(
+                    kind="ai",
+                    title=title,
+                    content=summary,
+                    source=name,
+                    source_url=link,
+                    matched_keywords=matched_kw[:5],
+                    extra={"source_type": "rss", "sub_category": sub_category},
+                ),
+            }
 
             results.append(CrawlResult(
                 category="ai",
@@ -160,11 +244,7 @@ class AICrawler(BaseCrawler):
                 source_url=link,
                 published_at=pub_date,
                 relevance_score=score,
-                extra_data={
-                    "matched_keywords": matched_kw[:5],
-                    "sub_category": sub_category,
-                    "source_type": "rss",
-                },
+                extra_data=extra_data,
             ))
 
         return results
@@ -172,22 +252,13 @@ class AICrawler(BaseCrawler):
     async def _crawl_http(self, source: dict) -> list[CrawlResult]:
         """通过 HTTP + CSS 选择器采集。"""
 
-        client = await self._get_client()
         url = source["url"]
         base_url = source.get("base_url", "")
         selectors = source.get("selectors", {})
         name = source["name"]
 
-        resp = await client.get(url)
-        resp.raise_for_status()
-        # 自动检测编码
-        if resp.encoding and resp.encoding.lower() in ("iso-8859-1", "windows-1252"):
-            match = re.search(r'charset=["\']?([^"\'\s;>]+)', resp.text[:2000])
-            if match:
-                resp.encoding = match.group(1)
-        resp.encoding = resp.encoding or "utf-8"
-
-        soup = BeautifulSoup(resp.text, "lxml")
+        html = await self._safe_get_text(url, source_name=name, source_policy=source.get("crawl_policy"))
+        soup = BeautifulSoup(html, "lxml")
 
         results: list[CrawlResult] = []
         list_selector = selectors.get("list", "article")
@@ -208,11 +279,6 @@ class AICrawler(BaseCrawler):
 
                 title = title_el.get_text(strip=True)
                 if not title or len(title) < 4:
-                    continue
-
-                # 关键词过滤（标题必须命中核心词）
-                matched_kw, score = _keyword_match(title, summary or "")
-                if not matched_kw:
                     continue
 
                 # 提取链接
@@ -244,7 +310,26 @@ class AICrawler(BaseCrawler):
                             summary = text[:200]
                             break
 
+                # 关键词过滤（标题必须命中核心词）
+                matched_kw, score = _keyword_match(title, summary or "", source)
+                if not matched_kw:
+                    continue
+
                 sub_category = self._classify_ai_topic(title)
+                extra_data = {
+                    "matched_keywords": matched_kw[:5],
+                    "sub_category": sub_category,
+                    "source_type": "http",
+                    "agent_profile": build_intelligence_profile(
+                        kind="ai",
+                        title=title,
+                        content=summary,
+                        source=name,
+                        source_url=link,
+                        matched_keywords=matched_kw[:5],
+                        extra={"source_type": "http", "sub_category": sub_category},
+                    ),
+                }
 
                 results.append(CrawlResult(
                     category="ai",
@@ -255,46 +340,71 @@ class AICrawler(BaseCrawler):
                     source_url=link,
                     published_at=pub_date,
                     relevance_score=score,
-                    extra_data={
-                        "matched_keywords": matched_kw[:5],
-                        "sub_category": sub_category,
-                        "source_type": "http",
-                    },
+                    extra_data=extra_data,
                 ))
 
             except Exception as e:
                 logger.debug("[ai] %s 解析单条失败: %s", name, e)
                 continue
 
-        return results
+        if not results:
+            discovered_feeds = await self.discover_feed_urls(
+                url,
+                source_name=name,
+                source_policy=source.get("crawl_policy"),
+                limit=3,
+            )
+            for feed_url in discovered_feeds:
+                try:
+                    feed_items = await self._crawl_rss({
+                        **source,
+                        "url": feed_url,
+                        "type": "rss",
+                        "crawl_policy": {
+                            **(source.get("crawl_policy") or {}),
+                            "risk_level": "rss_low",
+                            "discover_feeds": False,
+                        },
+                    })
+                    results.extend(feed_items)
+                    if len(results) >= CRAWLER_MAX_ITEMS_PER_SOURCE:
+                        break
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug("[ai] %s 发现订阅源解析失败: %s", name, exc)
+
+        return results[:CRAWLER_MAX_ITEMS_PER_SOURCE]
 
     @staticmethod
     def _classify_ai_topic(title: str) -> str:
         """判断 AI 资讯子分类。"""
 
-        title_lower = title.lower()
         # 公安/政务场景
-        if any(kw in title_lower for kw in ["公安", "警务", "110", "巡防", "情指行"]):
+        if any(contains_keyword(title, kw) for kw in ["公安", "警务", "110", "巡防", "情指行"]):
             return "public_security"
-        if any(kw in title_lower for kw in ["政数", "政务", "一网通办", "数字政府", "工信"]):
+        if any(contains_keyword(title, kw) for kw in ["政数", "政务", "一网通办", "数字政府", "工信"]):
             return "gov_affairs"
         # 智能体/Agent
-        if any(kw in title_lower for kw in ["agent", "智能体", "多智能体", "agentic"]):
+        if any(contains_keyword(title, kw) for kw in ["agent", "智能体", "多智能体", "agentic"]):
             return "agent"
-        # 空间智能
-        if any(kw in title_lower for kw in ["空间智能", "时空", "gis", "数字孪生", "cim", "三维"]):
+        # 空间数据/空间智能
+        if any(contains_keyword(title, kw) for kw in [
+            "空间智能", "空间数据", "地理空间", "时空", "gis", "地理信息", "测绘",
+            "数字孪生", "cim", "三维", "地图", "地址", "地理编码", "遥感", "点云",
+            "高精地图", "位置智能", "自然资源", "国土空间",
+            "osgeo", "gdal", "proj", "qgis", "postgis", "geoserver", "mapserver",
+        ]):
             return "spatial_ai"
         # 大模型
-        if any(kw in title_lower for kw in ["大模型", "llm", "gpt", "claude", "gemini", "deepseek"]):
+        if any(contains_keyword(title, kw) for kw in ["大模型", "llm", "gpt", "claude", "gemini", "deepseek"]):
             return "llm"
         # 一体机/硬件
-        if any(kw in title_lower for kw in ["一体机", "边缘", "信创"]):
+        if any(contains_keyword(title, kw) for kw in ["一体机", "边缘", "信创"]):
             return "hardware"
         # 论文
-        if any(kw in title_lower for kw in ["论文", "paper", "arxiv", "acl", "aaai", "survey"]):
+        if any(contains_keyword(title, kw) for kw in ["论文", "paper", "arxiv", "acl", "aaai", "survey"]):
             return "research"
         # AIGC
-        if any(kw in title_lower for kw in ["aigc", "生成式", "文生图", "文生视频"]):
+        if any(contains_keyword(title, kw) for kw in ["aigc", "生成式", "文生图", "文生视频"]):
             return "aigc"
         return "general"
 

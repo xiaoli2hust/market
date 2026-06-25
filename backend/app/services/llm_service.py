@@ -15,11 +15,17 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
+from datetime import datetime, timezone
 from typing import Any
 
 import httpx
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
+from ..models import LLMCallLog, LLMConfig, PromptTemplate
+from ..secret_store import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +61,15 @@ class LLMService:
         base_url: str | None = None,
         model: str | None = None,
         timeout: float = 60.0,
+        audit_db: AsyncSession | None = None,
+        default_scene: str = "generic",
     ) -> None:
         self.api_key = api_key if api_key is not None else settings.LLM_API_KEY
         self.base_url = (base_url or settings.LLM_BASE_URL).rstrip("/")
         self.model = model or settings.LLM_MODEL
         self._timeout = timeout
+        self._audit_db = audit_db
+        self._default_scene = default_scene
 
     # ---------- 内部工具 ----------
 
@@ -78,6 +88,7 @@ class LLMService:
         temperature: float = 0.2,
         response_format: dict[str, Any] | None = None,
         extra: dict[str, Any] | None = None,
+        scene: str | None = None,
     ) -> dict[str, Any]:
         """通用 chat.completions 调用。返回原始 JSON。"""
 
@@ -91,11 +102,66 @@ class LLMService:
         if extra:
             payload.update(extra)
 
-        url = f"{self.base_url}/chat/completions"
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            response = await client.post(url, json=payload, headers=self._headers())
-            response.raise_for_status()
-            return response.json()
+        scene_name = scene or self._default_scene
+        started = time.perf_counter()
+        try:
+            url = f"{self.base_url}/chat/completions"
+            headers = self._headers()
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+            self._record_call_log(
+                scene=scene_name,
+                status="success",
+                response=data,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+            )
+            return data
+        except Exception as exc:
+            self._record_call_log(
+                scene=scene_name,
+                status="error",
+                response=None,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                error_message=_short_error_message(exc),
+            )
+            raise
+
+    def _record_call_log(
+        self,
+        *,
+        scene: str,
+        status: str,
+        response: dict[str, Any] | None,
+        latency_ms: int,
+        error_message: str | None = None,
+    ) -> None:
+        """把一次模型调用写入当前事务；审计失败不影响主流程。"""
+
+        if self._audit_db is None:
+            return
+        try:
+            usage = response.get("usage") if isinstance(response, dict) else {}
+            prompt_tokens = _int_usage(usage, "prompt_tokens")
+            completion_tokens = _int_usage(usage, "completion_tokens")
+            total_tokens = _int_usage(usage, "total_tokens") or (prompt_tokens + completion_tokens)
+            self._audit_db.add(
+                LLMCallLog(
+                    scene=(scene or "generic")[:50],
+                    model_name=self.model,
+                    api_base_url=self.base_url,
+                    status=status,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=total_tokens,
+                    latency_ms=latency_ms,
+                    error_message=(error_message or "")[:1000] or None,
+                    created_at=datetime.now(timezone.utc),
+                )
+            )
+        except Exception as audit_error:  # noqa: BLE001
+            logger.warning("LLM 调用审计写入失败：%s", audit_error)
 
     async def extract_activities(self, chat_text: str) -> list[dict[str, Any]]:
         """兼容旧调用名：将聊天文本作为日报原文抽取活动。"""
@@ -103,10 +169,88 @@ class LLMService:
         return await parse_daily_report(user_name="", report_text=chat_text, service=self)
 
 
-def _build_prompt(user_name: str, report_text: str) -> str:
+async def get_runtime_llm_config(db: AsyncSession | None = None) -> dict[str, Any]:
+    """Load effective LLM config, preferring management-center settings."""
+
+    if db is not None:
+        row = (await db.execute(select(LLMConfig).limit(1))).scalar_one_or_none()
+        if row:
+            return {
+                "api_key": decrypt_secret(row.api_key) or settings.LLM_API_KEY,
+                "base_url": row.api_base_url or settings.LLM_BASE_URL,
+                "model": row.model_name or settings.LLM_MODEL,
+                "temperature": row.default_temperature,
+                "source": "management",
+            }
+    return {
+        "api_key": settings.LLM_API_KEY,
+        "base_url": settings.LLM_BASE_URL,
+        "model": settings.LLM_MODEL,
+        "temperature": 0.2,
+        "source": "environment",
+    }
+
+
+async def create_runtime_llm_service(
+    db: AsyncSession | None = None,
+    *,
+    timeout: float = 60.0,
+    scene: str = "generic",
+) -> LLMService:
+    """Create an LLM client from the effective runtime configuration."""
+
+    config = await get_runtime_llm_config(db)
+    return LLMService(
+        api_key=config["api_key"],
+        base_url=config["base_url"],
+        model=config["model"],
+        timeout=timeout,
+        audit_db=db,
+        default_scene=scene,
+    )
+
+
+async def get_prompt_template(
+    db: AsyncSession | None,
+    scene: str,
+    default_template: str,
+    *,
+    default_temperature: float = 0.2,
+    default_max_tokens: int = 2000,
+) -> dict[str, Any]:
+    """Load a prompt template from DB, falling back to code defaults."""
+
+    if db is not None:
+        row = (
+            await db.execute(select(PromptTemplate).where(PromptTemplate.scene == scene))
+        ).scalar_one_or_none()
+        if row:
+            return {
+                "template": row.template_text,
+                "temperature": row.temperature,
+                "max_tokens": row.max_tokens,
+                "source": "management",
+            }
+    return {
+        "template": default_template,
+        "temperature": default_temperature,
+        "max_tokens": default_max_tokens,
+        "source": "default",
+    }
+
+
+def _build_prompt(user_name: str, report_text: str, template: str | None = None) -> str:
     """构造行为抽取 prompt。"""
 
     user_hint = f"汇报人：{user_name}\n" if user_name else ""
+    if template:
+        return (
+            template
+            .replace("{action_types}", "、".join(ACTION_TYPES))
+            .replace("{user_name}", user_name or "")
+            .replace("{report_text}", report_text)
+            .replace("{text}", report_text)
+        )
     return (
         "你是一个营销活动分析助手。请分析以下工作日报内容，"
         "拆分出每一条具体的工作活动。\n\n"
@@ -167,6 +311,22 @@ def _extract_json_payload(text: str) -> Any | None:
     return None
 
 
+def _int_usage(usage: Any, key: str) -> int:
+    if not isinstance(usage, dict):
+        return 0
+    try:
+        return int(usage.get(key) or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _short_error_message(exc: Exception) -> str:
+    if isinstance(exc, httpx.HTTPStatusError):
+        body = exc.response.text[:500] if exc.response is not None else ""
+        return f"HTTP {exc.response.status_code}: {body}"
+    return str(exc)[:500]
+
+
 def _normalize_activities(raw: Any) -> list[dict[str, Any]]:
     """统一不同 LLM 输出形态为活动列表。"""
 
@@ -223,6 +383,7 @@ async def parse_daily_report(
     report_text: str,
     *,
     service: LLMService | None = None,
+    db: AsyncSession | None = None,
 ) -> list[dict[str, Any]]:
     """用通义千问解析日报原文，返回结构化活动列表。
 
@@ -233,12 +394,23 @@ async def parse_daily_report(
     if not report_text or not report_text.strip():
         return []
 
-    llm = service or LLMService()
+    llm = service or await create_runtime_llm_service(db, scene="daily_parse")
     if not llm.api_key:
         logger.info("LLM_API_KEY 未配置，跳过日报解析（user=%s）", user_name)
         return []
 
-    prompt = _build_prompt(user_name=user_name, report_text=report_text)
+    prompt_config = await get_prompt_template(
+        db,
+        "daily_parse",
+        _build_prompt(user_name=user_name, report_text=report_text),
+        default_temperature=0.1,
+        default_max_tokens=2000,
+    )
+    prompt = _build_prompt(
+        user_name=user_name,
+        report_text=report_text,
+        template=prompt_config["template"],
+    )
     messages = [
         {
             "role": "system",
@@ -252,8 +424,10 @@ async def parse_daily_report(
     try:
         response = await llm.chat(
             messages,
-            temperature=0.1,
+            temperature=float(prompt_config["temperature"]),
             response_format={"type": "json_object"},
+            extra={"max_tokens": int(prompt_config["max_tokens"])},
+            scene="daily_parse",
         )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code in (400, 422):
@@ -261,7 +435,12 @@ async def parse_daily_report(
                 "LLM 不支持 response_format，降级为普通 chat：%s", exc.response.text
             )
             try:
-                response = await llm.chat(messages, temperature=0.1)
+                response = await llm.chat(
+                    messages,
+                    temperature=float(prompt_config["temperature"]),
+                    extra={"max_tokens": int(prompt_config["max_tokens"])},
+                    scene="daily_parse",
+                )
             except Exception as inner:  # noqa: BLE001
                 logger.exception("LLM 调用失败（降级模式）：%s", inner)
                 return []
@@ -307,6 +486,9 @@ def get_llm_service() -> LLMService:
 __all__ = [
     "ACTION_TYPES",
     "LLMService",
+    "create_runtime_llm_service",
     "get_llm_service",
+    "get_prompt_template",
+    "get_runtime_llm_config",
     "parse_daily_report",
 ]

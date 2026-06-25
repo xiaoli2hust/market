@@ -21,14 +21,44 @@ import secrets
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..config import settings
 from ..models import Activity, ReportPage, Staff
+from .llm_service import create_runtime_llm_service, get_prompt_template
 
 logger = logging.getLogger(__name__)
+
+
+async def _prepare_report_version(
+    db: AsyncSession,
+    report_type: str,
+    report_date: date,
+) -> int:
+    """Return next version and archive replaceable drafts for the same period."""
+
+    next_version = (
+        await db.execute(
+            select(func.max(ReportPage.version)).where(
+                ReportPage.report_type == report_type,
+                ReportPage.report_date == report_date,
+            )
+        )
+    ).scalar_one_or_none()
+    rows = (
+        await db.execute(
+            select(ReportPage).where(
+                ReportPage.report_type == report_type,
+                ReportPage.report_date == report_date,
+                ReportPage.status != "published",
+            )
+        )
+    ).scalars().all()
+    now = datetime.now(timezone.utc)
+    for row in rows:
+        row.status = "superseded"
+        row.superseded_at = now
+    return int(next_version or 0) + 1
 
 
 # ---------------------------------------------------------------------------
@@ -361,30 +391,43 @@ def _compute_stats(
 # ---------------------------------------------------------------------------
 
 
-async def _call_llm(system_prompt: str, user_content: str) -> str | None:
+async def _call_llm(
+    db: AsyncSession,
+    system_prompt: str,
+    user_content: str,
+    *,
+    scene: str,
+) -> str | None:
     """Call LLM API for summary. Returns None on failure."""
 
-    if not settings.LLM_API_KEY:
-        logger.info("LLM_API_KEY not configured, skipping AI summary")
+    llm = await create_runtime_llm_service(db, scene=scene)
+    if not llm.api_key:
+        logger.info("LLM API Key not configured, skipping AI summary")
         return None
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            resp = await client.post(
-                f"{settings.LLM_BASE_URL}/v1/chat/completions",
-                headers={"Authorization": f"Bearer {settings.LLM_API_KEY}"},
-                json={
-                    "model": settings.LLM_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_content},
-                    ],
-                    "temperature": 0.3,
-                },
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return data["choices"][0]["message"]["content"]
+        prompt_config = await get_prompt_template(
+            db,
+            scene,
+            system_prompt,
+            default_temperature=0.3,
+            default_max_tokens=1500,
+        )
+        system_content = (
+            str(prompt_config["template"])
+            .replace("{activities}", user_content)
+            .replace("{text}", user_content)
+        )
+        data = await llm.chat(
+            [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_content},
+            ],
+            temperature=float(prompt_config["temperature"]),
+            extra={"max_tokens": int(prompt_config["max_tokens"])},
+            scene=scene,
+        )
+        return data["choices"][0]["message"]["content"]
     except Exception:
         logger.exception("LLM call failed, falling back to data-only report")
         return None
@@ -633,7 +676,7 @@ def _render_full_html(
 <body>
 <div class="report">
     <div class="masthead">
-        <div class="masthead-eyebrow">营销数据驾驶舱 · Marketing Data Cockpit</div>
+        <div class="masthead-eyebrow">Market 数据采集中心 · Market Data Collection Center</div>
         <div class="masthead-title">{_html_escape(title)}</div>
         <div class="masthead-meta">
             <div class="masthead-date">{_html_escape(date_range)}</div>
@@ -647,7 +690,7 @@ def _render_full_html(
         {body}
     </div>
     <div class="footer">
-        <div class="footer-text">营销数据驾驶舱 · 自动生成</div>
+        <div class="footer-text">Market 数据采集中心 · 自动生成</div>
         <div class="footer-line">内部资料 · 请勿外传</div>
     </div>
 </div>
@@ -676,7 +719,12 @@ async def generate_daily_report(
     summary = None
     if grouped:
         user_content = _build_user_content(grouped)
-        summary = await _call_llm(_DAILY_SYSTEM_PROMPT, user_content)
+        summary = await _call_llm(
+            db,
+            _DAILY_SYSTEM_PROMPT,
+            user_content,
+            scene="express_summary",
+        )
 
     day_of_year = target_date.timetuple().tm_yday
     issue = f"Vol.{target_date.year} / No.{day_of_year:03d}"
@@ -692,6 +740,7 @@ async def generate_daily_report(
     )
 
     now = datetime.now(timezone.utc)
+    version = await _prepare_report_version(db, "daily", target_date)
     report = ReportPage(
         report_type="daily",
         report_date=target_date,
@@ -701,6 +750,8 @@ async def generate_daily_report(
         access_token=secrets.token_urlsafe(32),
         token_expires_at=now + timedelta(days=30),
         push_status="draft",
+        status="draft",
+        version=version,
     )
     db.add(report)
     await db.flush()
@@ -731,7 +782,12 @@ async def generate_weekly_report(
             f"{stats['opportunity_count']} opportunities."
         )
         user_content = _build_user_content(grouped, extra=extra)
-        summary = await _call_llm(_WEEKLY_SYSTEM_PROMPT, user_content)
+        summary = await _call_llm(
+            db,
+            _WEEKLY_SYSTEM_PROMPT,
+            user_content,
+            scene="weekly_summary",
+        )
 
     day_of_year = week_start.timetuple().tm_yday
     issue = f"Vol.{week_start.year} / No.{day_of_year:03d}"
@@ -750,6 +806,7 @@ async def generate_weekly_report(
     )
 
     now = datetime.now(timezone.utc)
+    version = await _prepare_report_version(db, "weekly", week_start)
     report = ReportPage(
         report_type="weekly",
         report_date=week_start,
@@ -759,6 +816,8 @@ async def generate_weekly_report(
         access_token=secrets.token_urlsafe(32),
         token_expires_at=now + timedelta(days=30),
         push_status="draft",
+        status="draft",
+        version=version,
     )
     db.add(report)
     await db.flush()
