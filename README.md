@@ -68,6 +68,26 @@ npm run dev -- --host 127.0.0.1 --port 8002
 - `03 · 商机中心`：处理线索转商机、机器人追问、签单预测和回款预测。
 - `04 · 管理中心`：维护采集、关键词、模型、账号和系统配置。
 
+## 内置采集配置与数据快照
+
+仓库包含一份脱敏后的初始快照：
+
+- 文件：`backend/app/fixtures/market_snapshot.json`
+- 内容：118 个采集源、1 组关键词配置、1 组调度配置、359 条市场信号、359 条证据记录、359 条情报事件、94 条标讯线索。
+- 不包含：剑鱼账号密码、钉钉密钥、真实 `.env`、本地数据库文件、上传周报 HTML、第三方网页全文。
+
+本地空库导入：
+
+```bash
+PYTHONPATH=backend python3 backend/scripts/import_market_snapshot.py
+```
+
+重新从本机 SQLite 导出当前快照：
+
+```bash
+python3 backend/scripts/export_market_snapshot.py --db backend/market.db
+```
+
 ## 一键部署
 
 给完全不懂技术的人，优先使用这一条：
@@ -136,6 +156,12 @@ bash deploy/update.sh
 
 ```bash
 ./deploy/marketctl.sh up
+```
+
+导入仓库内置的脱敏采集配置和已抓取市场数据：
+
+```bash
+./deploy/marketctl.sh seed-snapshot
 ```
 
 后续代码更新：

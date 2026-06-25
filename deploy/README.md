@@ -50,6 +50,12 @@ bash deploy/update.sh
 ./deploy/marketctl.sh up
 ```
 
+如需把仓库内置的脱敏采集源、关键词和已抓取市场数据导入生产库：
+
+```bash
+./deploy/marketctl.sh seed-snapshot
+```
+
 ## 后续更新
 
 把新代码覆盖到服务器项目目录后执行：
@@ -65,6 +71,7 @@ bash deploy/update.sh
 ```bash
 ./deploy/marketctl.sh status
 ./deploy/marketctl.sh logs
+./deploy/marketctl.sh seed-snapshot
 ./deploy/marketctl.sh backup
 ./deploy/marketctl.sh pack
 ```

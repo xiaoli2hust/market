@@ -10,7 +10,9 @@ import ast
 import base64
 import hashlib
 import hmac
+import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -754,6 +756,45 @@ def check_frontend_proxy_contract() -> None:
     assert "API_PROXY_TARGET" in readme, "前端 README 必须说明开发代理覆盖方式"
 
 
+def check_market_snapshot_fixture_contract() -> None:
+    fixture_path = ROOT / "backend/app/fixtures/market_snapshot.json"
+    assert fixture_path.exists(), "必须提交脱敏采集配置与市场数据快照"
+    snapshot = json.loads(fixture_path.read_text(encoding="utf-8"))
+    counts = snapshot.get("metadata", {}).get("counts", {})
+    assert counts.get("crawler_sources", 0) >= 100, "快照必须包含已配置采集源"
+    assert counts.get("crawler_items", 0) >= 300, "快照必须包含已抓取市场信号"
+    assert counts.get("opportunity_leads", 0) >= 90, "快照必须包含已识别标讯线索"
+    assert counts.get("evidence_records") == counts.get("crawler_items"), "证据记录数量必须与采集信号对齐"
+    text = fixture_path.read_text(encoding="utf-8")
+    for pattern in (
+        re.compile(r"(?<!\d)1[3-9]\d{9}(?!\d)"),
+        re.compile(r"\bding[a-z0-9]{12,}\b", re.IGNORECASE),
+        re.compile(r"\bsk-[A-Za-z0-9_-]{20,}\b"),
+    ):
+        assert not pattern.search(text), "快照不能包含疑似真实外部平台凭证"
+    assert "content_excerpt" in text and '"content":' not in text, "快照只能提交摘录，不能提交第三方全文字段"
+    assert "seed-snapshot" in _read("deploy/marketctl.sh"), "部署工具必须提供快照导入命令"
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        db_path = Path(tmpdir) / "snapshot.db"
+        env = {
+            **os.environ,
+            "PYTHONPATH": str(BACKEND),
+            "DATABASE_URL": f"sqlite+aiosqlite:///{db_path}",
+        }
+        imported = subprocess.run(
+            [sys.executable, "backend/scripts/import_market_snapshot.py", "--fixture", str(fixture_path)],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert imported.returncode == 0, imported.stderr
+        imported_counts = json.loads(imported.stdout)
+        assert imported_counts["crawler_items"] == counts["crawler_items"], "快照导入必须恢复全部市场信号"
+
+
 def run_check(name: str, fn: Callable[[], None]) -> bool:
     try:
         fn()
@@ -798,6 +839,7 @@ def main() -> int:
         ("数据库迁移契约", check_database_migration_contract),
         ("CI 验收契约", check_ci_contract),
         ("前端代理契约", check_frontend_proxy_contract),
+        ("采集快照入仓契约", check_market_snapshot_fixture_contract),
     ]
     passed = sum(1 for name, fn in checks if run_check(name, fn))
     print(f"\n{passed}/{len(checks)} engineering checks passed")

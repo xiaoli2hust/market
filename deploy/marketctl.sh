@@ -20,6 +20,7 @@ Market 数据采集中心部署工具
                                   初始化 .env，自动生成随机密钥并写入公网访问配置
   ./deploy/marketctl.sh gate        运行安全与质量门禁
   ./deploy/marketctl.sh up          首次构建并启动生产服务
+  ./deploy/marketctl.sh seed-snapshot 导入仓库内置的脱敏采集源与市场数据快照
   ./deploy/marketctl.sh update      备份数据库、运行门禁、重建并替换服务
   ./deploy/marketctl.sh backup      备份 PostgreSQL 数据库
   ./deploy/marketctl.sh restore FILE 从备份 SQL 恢复数据库
@@ -190,6 +191,11 @@ cmd_up() {
   compose ps
 }
 
+cmd_seed_snapshot() {
+  require_env
+  compose exec -T backend python scripts/import_market_snapshot.py
+}
+
 cmd_backup() {
   require_env
   mkdir -p "$BACKUP_DIR"
@@ -290,6 +296,7 @@ case "${1:-}" in
   init) shift; cmd_init "$@" ;;
   gate) cmd_gate ;;
   up) cmd_up ;;
+  seed-snapshot) cmd_seed_snapshot ;;
   update) cmd_update ;;
   backup) cmd_backup ;;
   restore) shift; cmd_restore "${1:-}" ;;

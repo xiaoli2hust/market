@@ -59,6 +59,8 @@ user_chat_memory_backup/
 !frontend/package.json
 !frontend/package-lock.json
 !frontend/tsconfig.json
+!backend/app/fixtures/
+!backend/app/fixtures/*.json
 
 # Seed / import scripts (one-time use)
 backend/seed_*.py

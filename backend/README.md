@@ -24,6 +24,17 @@ python3 -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 
 SQLite 模式下应用启动会自动创建缺失表，并补齐必要的本地迁移字段。生产或多人环境请使用 PostgreSQL + Alembic。
 
+## 导入内置采集快照
+
+仓库内置 `backend/app/fixtures/market_snapshot.json`，用于恢复当前已经配置好的采集源、关键词、调度配置和已抓取的市场数据。
+
+```bash
+cd /Users/xiaoli/Documents/market-product
+PYTHONPATH=backend python3 backend/scripts/import_market_snapshot.py
+```
+
+快照是脱敏版本：不包含剑鱼账号密码、钉钉密钥、真实 `.env`、本地数据库文件、上传周报 HTML 或第三方网页全文。
+
 ## 数据库迁移
 
 PostgreSQL 部署使用 Alembic：
