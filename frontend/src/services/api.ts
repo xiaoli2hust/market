@@ -155,6 +155,10 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'opportunities:view',
     'opportunities:manage',
     'bot:view',
+    'bot:configure',
+    'bot:knowledge',
+    'bot:approve',
+    'bot:evaluate',
     'bot:broadcast',
     'management:view',
     'management:crawler',
@@ -175,6 +179,10 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'opportunities:view': '查看商机中心',
   'opportunities:manage': '确认与流转线索',
   'bot:view': '查看机器人中心',
+  'bot:configure': '配置机器人和 Skill',
+  'bot:knowledge': '管理机器人知识空间',
+  'bot:approve': '审批机器人外部动作',
+  'bot:evaluate': '运行机器人评测',
   'bot:broadcast': '发送机器人群发消息',
   'management:view': '进入管理中心',
   'management:crawler': '管理采集任务',
@@ -876,6 +884,10 @@ export interface BotOverview {
   enabled_skills: number;
   conversations: number;
   knowledge_files: number;
+  pending_approvals?: number;
+  active_tasks?: number;
+  failed_evaluations?: number;
+  collaboration_runs?: number;
   latest_run_at?: string | null;
 }
 
@@ -1005,6 +1017,12 @@ export interface BotKnowledgeFile {
   source_type: string;
   category: string;
   status: string;
+  review_status?: string;
+  visibility_scope?: string;
+  owner_profile_key?: string | null;
+  tags?: string[];
+  version?: number;
+  expires_at?: string | null;
   chunk_count: number;
   uploaded_by?: string | null;
   created_at?: string | null;
@@ -1067,6 +1085,103 @@ export interface BotBroadcastPayload {
   at_all?: boolean;
 }
 
+export interface BotTask {
+  id: number;
+  task_id: string;
+  title: string;
+  task_type: string;
+  profile_key: string;
+  status: string;
+  schedule_type: string;
+  schedule_config?: Record<string, any>;
+  input_payload?: Record<string, any>;
+  result_payload?: Record<string, any>;
+  last_run_at?: string | null;
+  next_run_at?: string | null;
+  created_by_name?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotActionApproval {
+  id: number;
+  action_id: string;
+  action_type: string;
+  title: string;
+  profile_key: string;
+  status: string;
+  payload?: Record<string, any>;
+  result_payload?: Record<string, any>;
+  requested_by_name?: string | null;
+  decided_by_name?: string | null;
+  decided_at?: string | null;
+  executed_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotTestCase {
+  id: number;
+  name: string;
+  profile_key: string;
+  input_text: string;
+  expected_skills: string[];
+  expected_contains: string[];
+  required_evidence: boolean;
+  priority: string;
+  last_result?: Record<string, any>;
+  last_run_at?: string | null;
+  status: string;
+  created_by_name?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotEvaluationRun {
+  id: number;
+  run_id: string;
+  test_case_id: number;
+  profile_key: string;
+  status: string;
+  score: number;
+  result_payload?: Record<string, any>;
+  created_by_name?: string | null;
+  created_at?: string | null;
+}
+
+export interface BotIntentCorrection {
+  id: number;
+  phrase: string;
+  profile_key?: string | null;
+  expected_skills: string[];
+  notes?: string | null;
+  status: string;
+  created_by_name?: string | null;
+  created_at?: string | null;
+}
+
+export interface BotCollaborationRun {
+  id: number;
+  run_id: string;
+  title: string;
+  lead_profile_key: string;
+  participant_profiles: string[];
+  input_text: string;
+  status: string;
+  result_payload?: Record<string, any>;
+  evidence_records?: BotEvidenceRecord[];
+  created_by_name?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotQualitySummary {
+  test_cases: number;
+  failed_evaluation_runs: number;
+  pending_actions: number;
+  no_evidence_skill_runs: number;
+}
+
 export async function fetchBotOverview() {
   return request<BotOverview>('/api/bot/overview', { method: 'GET' });
 }
@@ -1075,11 +1190,26 @@ export async function fetchBotProfiles() {
   return request<BotProfile[]>('/api/bot/profiles', { method: 'GET' });
 }
 
+export async function createBotProfile(data: Partial<BotProfile>) {
+  return request<BotProfile>('/api/bot/profiles', { method: 'POST', data });
+}
+
+export async function updateBotProfile(profileKey: string, data: Partial<BotProfile>) {
+  return request<BotProfile>(`/api/bot/profiles/${profileKey}`, { method: 'PUT', data });
+}
+
 export async function fetchBotSkills(params?: { category?: string }) {
   return request<BotSkill[]>('/api/bot/skills', { method: 'GET', params });
 }
 
-export async function updateBotSkill(skillKey: string, data: { enabled?: boolean; config?: Record<string, any> }) {
+export async function updateBotSkill(skillKey: string, data: {
+  enabled?: boolean;
+  config?: Record<string, any>;
+  trigger_scenarios?: string[];
+  evidence_rules?: Record<string, any>;
+  input_contract?: Record<string, any>;
+  output_contract?: Record<string, any>;
+}) {
   return request<BotSkill>(`/api/bot/skills/${skillKey}`, { method: 'PUT', data });
 }
 
@@ -1124,6 +1254,10 @@ export async function createBotKnowledgeText(data: {
   title: string;
   category?: string;
   text_content: string;
+  owner_profile_key?: string;
+  visibility_scope?: string;
+  review_status?: string;
+  tags?: string[];
 }) {
   return request<BotKnowledgeFile>('/api/bot/knowledge/text', { method: 'POST', data });
 }
@@ -1156,8 +1290,33 @@ export async function searchBotKnowledge(query: string) {
   );
 }
 
+export async function updateBotKnowledgeFile(fileId: string, data: Partial<BotKnowledgeFile>) {
+  return request<BotKnowledgeFile>(`/api/bot/knowledge/files/${fileId}`, { method: 'PUT', data });
+}
+
 export async function fetchBotChannelBindings() {
   return request<BotChannelBinding[]>('/api/bot/channel-bindings', { method: 'GET' });
+}
+
+export async function createBotChannelBinding(data: Partial<BotChannelBinding>) {
+  return request<BotChannelBinding>('/api/bot/channel-bindings', { method: 'POST', data });
+}
+
+export async function updateBotChannelBinding(channelKey: string, data: Partial<BotChannelBinding>) {
+  return request<BotChannelBinding>(`/api/bot/channel-bindings/${channelKey}`, { method: 'PUT', data });
+}
+
+export async function runBotInboundTest(data: {
+  channel_key?: string;
+  content: string;
+  sender_id?: string;
+  sender_name?: string;
+}) {
+  return request<BotChatTestResult>('/api/bot/inbound/test', {
+    method: 'POST',
+    data,
+    timeout: LONG_TASK_TIMEOUT_MS,
+  });
 }
 
 export async function fetchBotSkillRuns(params?: {
@@ -1170,6 +1329,73 @@ export async function fetchBotSkillRuns(params?: {
 
 export async function fetchBotAuditLogs(params?: { page?: number; page_size?: number }) {
   return request<{ total: number; items: BotAuditLog[] }>('/api/bot/audit-logs', { method: 'GET', params });
+}
+
+export async function fetchBotTasks(params?: { page?: number; page_size?: number }) {
+  return request<{ total: number; items: BotTask[] }>('/api/bot/tasks', { method: 'GET', params });
+}
+
+export async function createBotTask(data: Partial<BotTask>) {
+  return request<BotTask>('/api/bot/tasks', { method: 'POST', data });
+}
+
+export async function runBotTask(taskId: string) {
+  return request<BotTask>(`/api/bot/tasks/${taskId}/run`, { method: 'POST', timeout: LONG_TASK_TIMEOUT_MS });
+}
+
+export async function fetchBotApprovals(params?: { status?: string; page?: number; page_size?: number }) {
+  return request<{ total: number; items: BotActionApproval[] }>('/api/bot/approvals', { method: 'GET', params });
+}
+
+export async function createBotApproval(data: Partial<BotActionApproval>) {
+  return request<BotActionApproval>('/api/bot/approvals', { method: 'POST', data });
+}
+
+export async function decideBotApproval(actionId: string, decision: 'approve' | 'reject' | 'execute') {
+  return request<BotActionApproval>(`/api/bot/approvals/${actionId}/${decision}`, { method: 'POST' });
+}
+
+export async function fetchBotTestCases(params?: { profile_key?: string; page?: number; page_size?: number }) {
+  return request<{ total: number; items: BotTestCase[] }>('/api/bot/test-cases', { method: 'GET', params });
+}
+
+export async function createBotTestCase(data: Partial<BotTestCase>) {
+  return request<BotTestCase>('/api/bot/test-cases', { method: 'POST', data });
+}
+
+export async function runBotTestCase(caseId: number) {
+  return request<{ test_case: BotTestCase; run: BotEvaluationRun }>(
+    `/api/bot/test-cases/${caseId}/run`,
+    { method: 'POST', timeout: LONG_TASK_TIMEOUT_MS },
+  );
+}
+
+export async function fetchBotEvaluationRuns(params?: { page?: number; page_size?: number }) {
+  return request<{ total: number; items: BotEvaluationRun[] }>('/api/bot/evaluation-runs', { method: 'GET', params });
+}
+
+export async function fetchBotIntentCorrections() {
+  return request<BotIntentCorrection[]>('/api/bot/intent-corrections', { method: 'GET' });
+}
+
+export async function createBotIntentCorrection(data: Partial<BotIntentCorrection>) {
+  return request<BotIntentCorrection>('/api/bot/intent-corrections', { method: 'POST', data });
+}
+
+export async function fetchBotCollaborations(params?: { page?: number; page_size?: number }) {
+  return request<{ total: number; items: BotCollaborationRun[] }>('/api/bot/collaborations', { method: 'GET', params });
+}
+
+export async function runBotCollaboration(data: Partial<BotCollaborationRun>) {
+  return request<BotCollaborationRun>('/api/bot/collaborations/run', {
+    method: 'POST',
+    data,
+    timeout: LONG_TASK_TIMEOUT_MS,
+  });
+}
+
+export async function fetchBotQualitySummary() {
+  return request<BotQualitySummary>('/api/bot/quality-summary', { method: 'GET' });
 }
 
 export async function fetchBotBroadcasts(params?: {

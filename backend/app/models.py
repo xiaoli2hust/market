@@ -805,6 +805,12 @@ class BotKnowledgeFile(Base):
     category: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
     text_content: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="indexed", default="indexed", index=True)
+    review_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="approved", default="approved", index=True)
+    visibility_scope: Mapped[str] = mapped_column(String(40), nullable=False, server_default="all_bots", default="all_bots", index=True)
+    owner_profile_key: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1", default=1)
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
     chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
     uploaded_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -876,6 +882,10 @@ class BotTestCase(Base):
     input_text: Mapped[str] = mapped_column(Text, nullable=False)
     expected_skills: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     expected_contains: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    required_evidence: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true", default=True)
+    priority: Mapped[str] = mapped_column(String(20), nullable=False, server_default="P1", default="P1", index=True)
+    last_result: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="active", default="active")
     created_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
@@ -901,6 +911,131 @@ class BotAuditLog(Base):
     payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+
+class BotTask(Base):
+    """机器人任务：定时、手动或外部触发的 Agent 工作单。"""
+
+    __tablename__ = "bot_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    task_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    profile_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="enabled", default="enabled", index=True)
+    schedule_type: Mapped[str] = mapped_column(String(30), nullable=False, server_default="manual", default="manual")
+    schedule_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    input_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    result_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    next_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_bot_tasks_profile_status", "profile_key", "status"),
+        Index("ix_bot_tasks_type_status", "task_type", "status"),
+    )
+
+
+class BotActionApproval(Base):
+    """机器人外部动作审批：群发、提醒、数据变更等动作先审批再执行。"""
+
+    __tablename__ = "bot_action_approvals"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    action_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    action_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    profile_key: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending", default="pending", index=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    result_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    requested_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    decided_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    decided_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    executed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_bot_action_approvals_status_created", "status", "created_at"),
+    )
+
+
+class BotEvaluationRun(Base):
+    """机器人评测结果：记录测试用例每次运行是否达标。"""
+
+    __tablename__ = "bot_evaluation_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    test_case_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("bot_test_cases.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    profile_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    score: Mapped[float] = mapped_column(Float, nullable=False, server_default="0", default=0)
+    result_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+    __table_args__ = (
+        Index("ix_bot_evaluation_runs_profile_created", "profile_key", "created_at"),
+        Index("ix_bot_evaluation_runs_status_created", "status", "created_at"),
+    )
+
+
+class BotIntentCorrection(Base):
+    """意图纠错：把人工纠正沉淀为后续 Skill 路由参考。"""
+
+    __tablename__ = "bot_intent_corrections"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    phrase: Mapped[str] = mapped_column(String(200), nullable=False, index=True)
+    profile_key: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    expected_skills: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    notes: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="active", default="active", index=True)
+    created_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+
+class BotCollaborationRun(Base):
+    """多机器人协作：一个问题由多个 Profile 分工回答后汇总。"""
+
+    __tablename__ = "bot_collaboration_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    title: Mapped[str] = mapped_column(String(160), nullable=False)
+    lead_profile_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    participant_profiles: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    input_text: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    result_payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    evidence_records: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    created_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
 
@@ -982,6 +1117,11 @@ __all__ = [
     "BotChannelBinding",
     "BotTestCase",
     "BotAuditLog",
+    "BotTask",
+    "BotActionApproval",
+    "BotEvaluationRun",
+    "BotIntentCorrection",
+    "BotCollaborationRun",
     "APIKeyRecord",
     "DingtalkConfig",
 ]

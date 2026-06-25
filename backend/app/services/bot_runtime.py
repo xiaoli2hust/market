@@ -24,15 +24,21 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import (
     Activity,
     BotAuditLog,
+    BotActionApproval,
     BotChannelBinding,
+    BotCollaborationRun,
     BotConversation,
+    BotEvaluationRun,
+    BotIntentCorrection,
     BotKnowledgeChunk,
     BotKnowledgeFile,
     BotMessage,
     BotProfile,
     BotSkill,
     BotSkillRun,
+    BotTask,
     BotToolCall,
+    BotTestCase,
     CrawlerItem,
     DepartmentWeeklyReport,
     DingtalkConfig,
@@ -277,11 +283,25 @@ async def list_bot_runtime_overview(db: AsyncSession) -> dict[str, Any]:
     latest_run = (
         await db.execute(select(func.max(BotSkillRun.created_at)))
     ).scalar_one_or_none()
+    pending_approvals = (
+        await db.execute(select(func.count(BotActionApproval.id)).where(BotActionApproval.status == "pending"))
+    ).scalar_one() or 0
+    active_tasks = (
+        await db.execute(select(func.count(BotTask.id)).where(BotTask.status == "enabled"))
+    ).scalar_one() or 0
+    failed_evaluations = (
+        await db.execute(select(func.count(BotEvaluationRun.id)).where(BotEvaluationRun.status == "failed"))
+    ).scalar_one() or 0
+    collaboration_runs = (await db.execute(select(func.count(BotCollaborationRun.id)))).scalar_one() or 0
     return {
         "profiles": int(profile_count),
         "enabled_skills": int(skill_count),
         "conversations": int(conversation_count),
         "knowledge_files": int(knowledge_count),
+        "pending_approvals": int(pending_approvals),
+        "active_tasks": int(active_tasks),
+        "failed_evaluations": int(failed_evaluations),
+        "collaboration_runs": int(collaboration_runs),
         "latest_run_at": latest_run.isoformat() if latest_run else None,
     }
 
@@ -294,6 +314,9 @@ async def run_agent_chat(
     user: dict[str, Any],
     conversation_id: str | None = None,
     simulated_user_role: str | None = None,
+    channel_type: str = "test_console",
+    message_source: str = "test_console",
+    conversation_meta: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run a test-console chat turn and persist every relevant event."""
 
@@ -319,13 +342,15 @@ async def run_agent_chat(
         conversation_id=conversation_id,
         simulated_user_role=simulated_user_role,
         first_message=clean_message,
+        channel_type=channel_type,
+        meta=conversation_meta,
     )
     user_message = BotMessage(
         conversation_pk=conversation.id,
         role="user",
         content=clean_message,
-        source="test_console",
-        meta={"simulated_user_role": simulated_user_role or profile.default_role},
+        source=message_source,
+        meta={"simulated_user_role": simulated_user_role or profile.default_role, **(conversation_meta or {})},
     )
     db.add(user_message)
     await db.flush()
@@ -392,6 +417,10 @@ async def upload_knowledge_text(
     file_name: str | None = None,
     content_type: str | None = None,
     source_type: str = "manual_upload",
+    owner_profile_key: str | None = None,
+    visibility_scope: str = "all_bots",
+    tags: list[str] | None = None,
+    review_status: str = "approved",
 ) -> dict[str, Any]:
     clean_text = _normalize_text(text_content)
     clean_title = title.strip()[:200]
@@ -409,6 +438,10 @@ async def upload_knowledge_text(
         category=(category or "general")[:50],
         text_content=clean_text[:300000],
         status="indexed",
+        review_status=review_status if review_status in {"pending", "approved", "rejected"} else "approved",
+        visibility_scope=visibility_scope if visibility_scope in {"all_bots", "profile_only"} else "all_bots",
+        owner_profile_key=owner_profile_key[:80] if owner_profile_key else None,
+        tags=[str(tag).strip()[:40] for tag in (tags or []) if str(tag).strip()][:20],
         uploaded_by=_user_name(user),
         created_at=now,
         updated_at=now,
@@ -439,6 +472,415 @@ async def upload_knowledge_text(
     return _knowledge_file_dict(file)
 
 
+async def upsert_bot_profile(
+    db: AsyncSession,
+    *,
+    payload: dict[str, Any],
+    user: dict[str, Any],
+    profile_key: str | None = None,
+) -> dict[str, Any]:
+    """Create or update a bot profile from the operations console."""
+
+    await ensure_bot_runtime_defaults(db)
+    clean_key = (profile_key or str(payload.get("profile_key") or "")).strip()
+    if not clean_key:
+        clean_key = f"custom_agent_{uuid.uuid4().hex[:8]}"
+    if not re.fullmatch(r"[a-zA-Z0-9_.-]{3,80}", clean_key):
+        raise ValueError("机器人标识只能包含字母、数字、点、横线和下划线")
+    name = str(payload.get("name") or "").strip()[:100]
+    if not name:
+        raise ValueError("机器人名称不能为空")
+    status = str(payload.get("status") or "enabled").strip()
+    if status not in {"enabled", "disabled"}:
+        raise ValueError("机器人状态不支持")
+    all_skills = {
+        row.skill_key
+        for row in (await db.execute(select(BotSkill))).scalars().all()
+    }
+    allowed_skills = [
+        str(item).strip()
+        for item in (payload.get("allowed_skills") or [])
+        if str(item).strip() in all_skills
+    ]
+    row = (
+        await db.execute(select(BotProfile).where(BotProfile.profile_key == clean_key))
+    ).scalar_one_or_none()
+    if not row:
+        row = BotProfile(
+            profile_key=clean_key,
+            name=name,
+            status=status,
+            allowed_skills=allowed_skills,
+            config={},
+        )
+        db.add(row)
+    row.name = name
+    row.description = str(payload.get("description") or "").strip()[:2000]
+    row.default_role = str(payload.get("default_role") or "业务用户").strip()[:80]
+    row.system_prompt = str(payload.get("system_prompt") or _default_system_prompt(row.name, row.description or "")).strip()[:8000]
+    row.status = status
+    row.allowed_skills = allowed_skills
+    row.config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    row.updated_at = datetime.now(timezone.utc)
+    _audit(db, event_type="profile_saved", user=user, profile_key=row.profile_key, payload={"name": row.name, "status": row.status})
+    await db.flush()
+    await db.refresh(row)
+    return _profile_dict(row)
+
+
+async def update_knowledge_metadata(
+    db: AsyncSession,
+    *,
+    file_id: str,
+    payload: dict[str, Any],
+    user: dict[str, Any],
+) -> dict[str, Any]:
+    row = (
+        await db.execute(select(BotKnowledgeFile).where(BotKnowledgeFile.file_id == file_id))
+    ).scalar_one_or_none()
+    if not row:
+        raise ValueError("知识文件不存在")
+    for field in ("title", "category"):
+        if field in payload:
+            value = str(payload.get(field) or "").strip()
+            if value:
+                setattr(row, field, value[:200] if field == "title" else value[:50])
+    if "status" in payload and payload["status"] in {"indexed", "archived"}:
+        row.status = payload["status"]
+    if "review_status" in payload and payload["review_status"] in {"pending", "approved", "rejected"}:
+        row.review_status = payload["review_status"]
+    if "visibility_scope" in payload and payload["visibility_scope"] in {"all_bots", "profile_only"}:
+        row.visibility_scope = payload["visibility_scope"]
+    if "owner_profile_key" in payload:
+        owner = str(payload.get("owner_profile_key") or "").strip()
+        row.owner_profile_key = owner[:80] if owner else None
+    if "tags" in payload and isinstance(payload["tags"], list):
+        row.tags = [str(tag).strip()[:40] for tag in payload["tags"] if str(tag).strip()][:20]
+    row.updated_at = datetime.now(timezone.utc)
+    _audit(db, event_type="knowledge_metadata_updated", user=user, payload={"file_id": row.file_id, "status": row.status})
+    await db.flush()
+    await db.refresh(row)
+    return _knowledge_file_dict(row)
+
+
+async def handle_inbound_message(
+    db: AsyncSession,
+    *,
+    channel_key: str,
+    content: str,
+    sender_id: str | None,
+    sender_name: str | None,
+    raw_payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Process a real channel message through the bound bot profile."""
+
+    await ensure_bot_runtime_defaults(db)
+    clean = content.strip()
+    if not clean:
+        raise ValueError("入站消息不能为空")
+    binding = (
+        await db.execute(
+            select(BotChannelBinding).where(
+                BotChannelBinding.channel_key == channel_key,
+                BotChannelBinding.status == "active",
+            )
+        )
+    ).scalar_one_or_none()
+    if not binding:
+        raise ValueError("未找到可用群聊绑定")
+    binding.last_seen_at = datetime.now(timezone.utc)
+    external_thread_key = f"{binding.channel_type}:{binding.channel_key}:{sender_id or 'anonymous'}"
+    conversation = await _find_channel_conversation(db, binding.bot_profile_key, external_thread_key)
+    result = await run_agent_chat(
+        db,
+        profile_key=binding.bot_profile_key,
+        message=clean,
+        user={"id": None, "username": sender_name or "外部用户", "permissions": ["bot:view", "intelligence:view", "reports:view", "opportunities:view"]},
+        conversation_id=conversation.conversation_id if conversation else None,
+        simulated_user_role=sender_name or "群聊用户",
+        channel_type=binding.channel_type,
+        message_source=f"{binding.channel_type}_inbound",
+        conversation_meta={
+            "channel_key": binding.channel_key,
+            "channel_name": binding.channel_name,
+            "external_thread_key": external_thread_key,
+            "sender_id": sender_id,
+            "raw_payload": raw_payload or {},
+        },
+    )
+    _audit(
+        db,
+        event_type="inbound_message_handled",
+        user={"username": sender_name or "外部用户"},
+        profile_key=binding.bot_profile_key,
+        conversation_id=result["conversation"]["conversation_id"],
+        payload={"channel_key": channel_key, "sender_id": sender_id},
+    )
+    await db.flush()
+    return result
+
+
+async def create_bot_task(db: AsyncSession, *, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    await ensure_bot_runtime_defaults(db)
+    title = str(payload.get("title") or "").strip()[:160]
+    if not title:
+        raise ValueError("任务名称不能为空")
+    task_type = str(payload.get("task_type") or "custom_prompt").strip()
+    profile_key = str(payload.get("profile_key") or "management_assistant_agent").strip()
+    task = BotTask(
+        task_id=f"BT-{uuid.uuid4().hex[:12]}",
+        title=title,
+        task_type=task_type,
+        profile_key=profile_key,
+        status=str(payload.get("status") or "enabled")[:20],
+        schedule_type=str(payload.get("schedule_type") or "manual")[:30],
+        schedule_config=payload.get("schedule_config") if isinstance(payload.get("schedule_config"), dict) else {},
+        input_payload=payload.get("input_payload") if isinstance(payload.get("input_payload"), dict) else {},
+        created_by_name=_user_name(user),
+    )
+    db.add(task)
+    _audit(db, event_type="task_created", user=user, profile_key=profile_key, payload={"task_id": task.task_id, "task_type": task.task_type})
+    await db.flush()
+    await db.refresh(task)
+    return _task_dict(task)
+
+
+async def run_bot_task_now(db: AsyncSession, *, task_id: str, user: dict[str, Any]) -> dict[str, Any]:
+    task = (
+        await db.execute(select(BotTask).where(BotTask.task_id == task_id))
+    ).scalar_one_or_none()
+    if not task:
+        raise ValueError("任务不存在")
+    prompt = _task_prompt(task)
+    started = datetime.now(timezone.utc)
+    result = await run_agent_chat(
+        db,
+        profile_key=task.profile_key,
+        message=prompt,
+        user=user,
+        simulated_user_role="任务调度器",
+        channel_type="task",
+        message_source="bot_task",
+        conversation_meta={"task_id": task.task_id, "task_type": task.task_type},
+    )
+    task.last_run_at = started
+    task.result_payload = {
+        "conversation": result["conversation"],
+        "answer": result["assistant_message"]["content"],
+        "skills": [item["skill_key"] for item in result.get("selected_skills", [])],
+        "evidence_count": len(result.get("evidence_records") or []),
+    }
+    task.updated_at = datetime.now(timezone.utc)
+    _audit(db, event_type="task_run", user=user, profile_key=task.profile_key, conversation_id=result["conversation"]["conversation_id"], payload={"task_id": task.task_id})
+    await db.flush()
+    await db.refresh(task)
+    return _task_dict(task)
+
+
+async def create_action_approval(db: AsyncSession, *, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    title = str(payload.get("title") or "").strip()[:160]
+    if not title:
+        raise ValueError("动作标题不能为空")
+    action_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
+    row = BotActionApproval(
+        action_id=f"BA-{uuid.uuid4().hex[:12]}",
+        action_type=str(payload.get("action_type") or "dingtalk_broadcast")[:50],
+        title=title,
+        profile_key=str(payload.get("profile_key") or "")[:80] or None,
+        status="pending",
+        payload=action_payload,
+        requested_by_name=_user_name(user),
+    )
+    db.add(row)
+    _audit(db, event_type="action_approval_created", user=user, profile_key=row.profile_key, payload={"action_id": row.action_id, "action_type": row.action_type})
+    await db.flush()
+    await db.refresh(row)
+    return _approval_dict(row)
+
+
+async def decide_action_approval(db: AsyncSession, *, action_id: str, decision: str, user: dict[str, Any]) -> dict[str, Any]:
+    row = (
+        await db.execute(select(BotActionApproval).where(BotActionApproval.action_id == action_id))
+    ).scalar_one_or_none()
+    if not row:
+        raise ValueError("审批动作不存在")
+    if row.status not in {"pending", "approved"} and decision != "execute":
+        raise ValueError("当前状态不能审批")
+    now = datetime.now(timezone.utc)
+    if decision == "approve":
+        row.status = "approved"
+        row.decided_by_name = _user_name(user)
+        row.decided_at = now
+    elif decision == "reject":
+        row.status = "rejected"
+        row.decided_by_name = _user_name(user)
+        row.decided_at = now
+    elif decision == "execute":
+        if row.status != "approved":
+            raise ValueError("动作必须先审批通过才能执行")
+        row.status = "executed"
+        row.executed_at = now
+        row.result_payload = {"message": "动作已确认，外部执行由对应发送接口完成", "payload": row.payload}
+    else:
+        raise ValueError("审批动作不支持")
+    row.updated_at = now
+    _audit(db, event_type=f"action_{decision}", user=user, profile_key=row.profile_key, payload={"action_id": row.action_id})
+    await db.flush()
+    await db.refresh(row)
+    return _approval_dict(row)
+
+
+async def create_test_case(db: AsyncSession, *, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    name = str(payload.get("name") or "").strip()[:120]
+    input_text = str(payload.get("input_text") or "").strip()
+    if not name or not input_text:
+        raise ValueError("测试用例名称和问题不能为空")
+    row = BotTestCase(
+        name=name,
+        profile_key=str(payload.get("profile_key") or "management_assistant_agent")[:80],
+        input_text=input_text,
+        expected_skills=[str(item) for item in (payload.get("expected_skills") or [])],
+        expected_contains=[str(item) for item in (payload.get("expected_contains") or [])],
+        required_evidence=bool(payload.get("required_evidence", True)),
+        priority=str(payload.get("priority") or "P1")[:20],
+        created_by_name=_user_name(user),
+        status="active",
+    )
+    db.add(row)
+    _audit(db, event_type="test_case_created", user=user, profile_key=row.profile_key, payload={"name": row.name})
+    await db.flush()
+    await db.refresh(row)
+    return _test_case_dict(row)
+
+
+async def run_test_case(db: AsyncSession, *, case_id: int, user: dict[str, Any]) -> dict[str, Any]:
+    case = (
+        await db.execute(select(BotTestCase).where(BotTestCase.id == case_id))
+    ).scalar_one_or_none()
+    if not case:
+        raise ValueError("测试用例不存在")
+    result = await run_agent_chat(
+        db,
+        profile_key=case.profile_key,
+        message=case.input_text,
+        user=user,
+        simulated_user_role="评测用户",
+        channel_type="evaluation",
+        message_source="bot_evaluation",
+        conversation_meta={"test_case_id": case.id},
+    )
+    selected = [item["skill_key"] for item in result.get("selected_skills", [])]
+    answer = result["assistant_message"]["content"]
+    missing_skills = [skill for skill in (case.expected_skills or []) if skill not in selected]
+    missing_text = [text for text in (case.expected_contains or []) if text not in answer]
+    evidence_count = len(result.get("evidence_records") or [])
+    failures = []
+    if missing_skills:
+        failures.append({"type": "missing_skills", "items": missing_skills})
+    if missing_text:
+        failures.append({"type": "missing_text", "items": missing_text})
+    if case.required_evidence and evidence_count == 0:
+        failures.append({"type": "missing_evidence", "items": []})
+    passed = not failures
+    score = 1.0 if passed else max(0.0, 1.0 - 0.25 * len(failures))
+    run = BotEvaluationRun(
+        run_id=f"EVR-{uuid.uuid4().hex[:12]}",
+        test_case_id=case.id,
+        profile_key=case.profile_key,
+        status="passed" if passed else "failed",
+        score=score,
+        result_payload={
+            "selected_skills": selected,
+            "evidence_count": evidence_count,
+            "failures": failures,
+            "conversation": result["conversation"],
+        },
+        created_by_name=_user_name(user),
+    )
+    db.add(run)
+    case.last_result = run.result_payload | {"status": run.status, "score": run.score}
+    case.last_run_at = datetime.now(timezone.utc)
+    _audit(db, event_type="test_case_run", user=user, profile_key=case.profile_key, payload={"case_id": case.id, "status": run.status, "score": run.score})
+    await db.flush()
+    await db.refresh(run)
+    await db.refresh(case)
+    return {"test_case": _test_case_dict(case), "run": _evaluation_run_dict(run)}
+
+
+async def create_intent_correction(db: AsyncSession, *, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    phrase = str(payload.get("phrase") or "").strip()[:200]
+    expected_skills = [str(item).strip() for item in (payload.get("expected_skills") or []) if str(item).strip()]
+    if not phrase or not expected_skills:
+        raise ValueError("纠错短语和期望 Skill 不能为空")
+    row = BotIntentCorrection(
+        phrase=phrase,
+        profile_key=str(payload.get("profile_key") or "")[:80] or None,
+        expected_skills=expected_skills[:10],
+        notes=str(payload.get("notes") or "").strip()[:1000] or None,
+        created_by_name=_user_name(user),
+    )
+    db.add(row)
+    _audit(db, event_type="intent_correction_created", user=user, profile_key=row.profile_key, payload={"phrase": phrase, "expected_skills": expected_skills})
+    await db.flush()
+    await db.refresh(row)
+    return _intent_correction_dict(row)
+
+
+async def run_collaboration(db: AsyncSession, *, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    question = str(payload.get("input_text") or "").strip()
+    if not question:
+        raise ValueError("协作问题不能为空")
+    participants = [str(item).strip() for item in (payload.get("participant_profiles") or []) if str(item).strip()]
+    if not participants:
+        participants = ["market_intelligence_agent", "daily_report_agent", "opportunity_followup_agent"]
+    lead = str(payload.get("lead_profile_key") or "management_assistant_agent").strip()
+    run = BotCollaborationRun(
+        run_id=f"COL-{uuid.uuid4().hex[:12]}",
+        title=str(payload.get("title") or question[:60] or "多机器人协作")[:160],
+        lead_profile_key=lead,
+        participant_profiles=participants,
+        input_text=question,
+        status="running",
+        result_payload={},
+        evidence_records=[],
+        created_by_name=_user_name(user),
+    )
+    db.add(run)
+    await db.flush()
+    answers = []
+    evidence = []
+    for profile_key in participants:
+        try:
+            item = await run_agent_chat(
+                db,
+                profile_key=profile_key,
+                message=question,
+                user=user,
+                simulated_user_role="协作任务",
+                channel_type="collaboration",
+                message_source="bot_collaboration",
+                conversation_meta={"collaboration_run_id": run.run_id, "participant": profile_key},
+            )
+            answers.append({"profile_key": profile_key, "answer": item["assistant_message"]["content"], "conversation": item["conversation"]})
+            evidence.extend(item.get("evidence_records") or [])
+        except Exception as exc:  # noqa: BLE001
+            answers.append({"profile_key": profile_key, "error": str(exc)[:500]})
+    run.status = "completed"
+    run.evidence_records = evidence[:30]
+    run.result_payload = {
+        "answers": answers,
+        "summary": _fallback_answer(
+            [{"skill_key": "collaboration", "skill_name": "多机器人协作", "evidence_records": evidence}],
+            evidence,
+        ),
+    }
+    run.updated_at = datetime.now(timezone.utc)
+    _audit(db, event_type="collaboration_run", user=user, profile_key=lead, payload={"run_id": run.run_id, "participants": participants})
+    await db.flush()
+    await db.refresh(run)
+    return _collaboration_dict(run)
+
+
 def extract_text_from_html(html: str) -> str:
     extractor = _HTMLTextExtractor()
     extractor.feed(html)
@@ -453,6 +895,8 @@ async def _get_or_create_conversation(
     conversation_id: str | None,
     simulated_user_role: str | None,
     first_message: str,
+    channel_type: str = "test_console",
+    meta: dict[str, Any] | None = None,
 ) -> BotConversation:
     if conversation_id:
         existing = (
@@ -466,15 +910,34 @@ async def _get_or_create_conversation(
         profile_key=profile.profile_key,
         title=title,
         simulated_user_role=simulated_user_role or profile.default_role,
-        channel_type="test_console",
+        channel_type=channel_type,
         status="active",
         created_by=_user_id(user),
         created_by_name=_user_name(user),
-        meta={"entry": "bot_center"},
+        meta={"entry": "bot_center", **(meta or {})},
     )
     db.add(conversation)
     await db.flush()
     return conversation
+
+
+async def _find_channel_conversation(
+    db: AsyncSession,
+    profile_key: str,
+    external_thread_key: str,
+) -> BotConversation | None:
+    rows = (
+        await db.execute(
+            select(BotConversation)
+            .where(BotConversation.profile_key == profile_key, BotConversation.status == "active")
+            .order_by(BotConversation.updated_at.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    for row in rows:
+        if (row.meta or {}).get("external_thread_key") == external_thread_key:
+            return row
+    return None
 
 
 async def _select_skills(
@@ -492,6 +955,16 @@ async def _select_skills(
     by_key = {row.skill_key: row for row in rows}
     text = message.lower()
     selected: list[str] = []
+    corrections = (
+        await db.execute(
+            select(BotIntentCorrection).where(BotIntentCorrection.status == "active")
+        )
+    ).scalars().all()
+    for correction in corrections:
+        if correction.profile_key and correction.profile_key != profile.profile_key:
+            continue
+        if correction.phrase and correction.phrase.lower() in text:
+            selected.extend(correction.expected_skills or [])
     market_context = _has_any(text, ["公安", "政数", "空间", "地图", "大数据", "电力", "运营商", "市场", "行业"])
     opportunity_context = _has_any(text, ["机会", "跟进", "重点关注", "销售线索", "客户切入", "近期"])
     if _has_any(text, ["标讯", "招投标", "投标", "采购", "预算", "项目机会"]) or (market_context and opportunity_context):
@@ -589,7 +1062,16 @@ async def _skill_knowledge_search(
     for term in terms[:5]:
         pattern = f"%{term}%"
         conditions.append(BotKnowledgeChunk.content.ilike(pattern))
-    stmt = select(BotKnowledgeChunk, BotKnowledgeFile).join(BotKnowledgeFile, BotKnowledgeChunk.file_pk == BotKnowledgeFile.id)
+    now = datetime.now(timezone.utc)
+    stmt = (
+        select(BotKnowledgeChunk, BotKnowledgeFile)
+        .join(BotKnowledgeFile, BotKnowledgeChunk.file_pk == BotKnowledgeFile.id)
+        .where(
+            BotKnowledgeFile.status == "indexed",
+            BotKnowledgeFile.review_status == "approved",
+            (BotKnowledgeFile.expires_at.is_(None)) | (BotKnowledgeFile.expires_at > now),
+        )
+    )
     if conditions:
         stmt = stmt.where(or_(*conditions))
     stmt = stmt.order_by(BotKnowledgeChunk.created_at.desc()).limit(8)
@@ -1078,8 +1560,146 @@ def _knowledge_file_dict(row: BotKnowledgeFile) -> dict[str, Any]:
         "source_type": row.source_type,
         "category": row.category,
         "status": row.status,
+        "review_status": row.review_status,
+        "visibility_scope": row.visibility_scope,
+        "owner_profile_key": row.owner_profile_key,
+        "tags": row.tags or [],
+        "version": row.version,
+        "expires_at": row.expires_at.isoformat() if row.expires_at else None,
         "chunk_count": row.chunk_count,
         "uploaded_by": row.uploaded_by,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _profile_dict(row: BotProfile) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "profile_key": row.profile_key,
+        "name": row.name,
+        "description": row.description,
+        "system_prompt": row.system_prompt,
+        "default_role": row.default_role,
+        "status": row.status,
+        "allowed_skills": row.allowed_skills or [],
+        "config": row.config or {},
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _task_prompt(task: BotTask) -> str:
+    payload = task.input_payload or {}
+    custom_prompt = str(payload.get("prompt") or "").strip()
+    if custom_prompt:
+        return custom_prompt
+    if task.task_type == "market_digest":
+        return "请基于最新标讯、政策与市场线索，生成一份可发给管理者的市场洞察简报，必须列出证据和下一步动作。"
+    if task.task_type == "weekly_summary":
+        return "请基于部门周报归档，总结本周部门发生了什么、风险是什么、下周建议关注什么。"
+    if task.task_type == "opportunity_followup":
+        return "请检查当前商机进展，找出需要销售跟进、签单预测或回款预测关注的事项。"
+    return f"请执行机器人任务：{task.title}"
+
+
+def _task_dict(row: BotTask) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "task_id": row.task_id,
+        "title": row.title,
+        "task_type": row.task_type,
+        "profile_key": row.profile_key,
+        "status": row.status,
+        "schedule_type": row.schedule_type,
+        "schedule_config": row.schedule_config or {},
+        "input_payload": row.input_payload or {},
+        "result_payload": row.result_payload or {},
+        "last_run_at": row.last_run_at.isoformat() if row.last_run_at else None,
+        "next_run_at": row.next_run_at.isoformat() if row.next_run_at else None,
+        "created_by_name": row.created_by_name,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _approval_dict(row: BotActionApproval) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "action_id": row.action_id,
+        "action_type": row.action_type,
+        "title": row.title,
+        "profile_key": row.profile_key,
+        "status": row.status,
+        "payload": row.payload or {},
+        "result_payload": row.result_payload or {},
+        "requested_by_name": row.requested_by_name,
+        "decided_by_name": row.decided_by_name,
+        "decided_at": row.decided_at.isoformat() if row.decided_at else None,
+        "executed_at": row.executed_at.isoformat() if row.executed_at else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _test_case_dict(row: BotTestCase) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "name": row.name,
+        "profile_key": row.profile_key,
+        "input_text": row.input_text,
+        "expected_skills": row.expected_skills or [],
+        "expected_contains": row.expected_contains or [],
+        "required_evidence": row.required_evidence,
+        "priority": row.priority,
+        "last_result": row.last_result or {},
+        "last_run_at": row.last_run_at.isoformat() if row.last_run_at else None,
+        "status": row.status,
+        "created_by_name": row.created_by_name,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _evaluation_run_dict(row: BotEvaluationRun) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "run_id": row.run_id,
+        "test_case_id": row.test_case_id,
+        "profile_key": row.profile_key,
+        "status": row.status,
+        "score": row.score,
+        "result_payload": row.result_payload or {},
+        "created_by_name": row.created_by_name,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _intent_correction_dict(row: BotIntentCorrection) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "phrase": row.phrase,
+        "profile_key": row.profile_key,
+        "expected_skills": row.expected_skills or [],
+        "notes": row.notes,
+        "status": row.status,
+        "created_by_name": row.created_by_name,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _collaboration_dict(row: BotCollaborationRun) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "run_id": row.run_id,
+        "title": row.title,
+        "lead_profile_key": row.lead_profile_key,
+        "participant_profiles": row.participant_profiles or [],
+        "input_text": row.input_text,
+        "status": row.status,
+        "result_payload": row.result_payload or {},
+        "evidence_records": row.evidence_records or [],
+        "created_by_name": row.created_by_name,
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }

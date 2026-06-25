@@ -312,7 +312,8 @@ required = {
     "bot_profiles", "bot_skills", "bot_conversations", "bot_messages",
     "bot_skill_runs", "bot_tool_calls", "bot_knowledge_files",
     "bot_knowledge_chunks", "bot_channel_bindings", "bot_test_cases",
-    "bot_audit_logs",
+    "bot_audit_logs", "bot_tasks", "bot_action_approvals",
+    "bot_evaluation_runs", "bot_intent_corrections", "bot_collaboration_runs",
 }
 missing = sorted(required - tables)
 conn.close()

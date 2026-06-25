@@ -159,6 +159,7 @@ def _auto_migrate_sqlite() -> None:
             conn.execute("CREATE INDEX IF NOT EXISTS ix_crawler_sources_runtime_status ON crawler_sources (runtime_status)")
             conn.execute("CREATE INDEX IF NOT EXISTS ix_crawler_sources_cooldown_until ON crawler_sources (cooldown_until)")
         _auto_migrate_intelligence_sqlite(conn)
+        _auto_migrate_bot_sqlite(conn)
         ensure_default_crawler_sources_sqlite(conn)
         _encrypt_legacy_sqlite_secrets(conn)
         _hash_legacy_sqlite_api_keys(conn)
@@ -506,6 +507,39 @@ def _sqlite_notice_type(extra: dict, re_module) -> str | None:
     if "公示" in text:
         return "公示"
     return _sqlite_clean(text, 80, re_module)
+
+
+def _auto_migrate_bot_sqlite(conn) -> None:
+    """Backfill bot runtime columns for existing local SQLite databases."""
+
+    knowledge_cols = [row[1] for row in conn.execute("PRAGMA table_info(bot_knowledge_files)").fetchall()]
+    if knowledge_cols:
+        for column_name, ddl in {
+            "review_status": "VARCHAR(20) NOT NULL DEFAULT 'approved'",
+            "visibility_scope": "VARCHAR(40) NOT NULL DEFAULT 'all_bots'",
+            "owner_profile_key": "VARCHAR(80)",
+            "tags": "JSON NOT NULL DEFAULT '[]'",
+            "version": "INTEGER NOT NULL DEFAULT 1",
+            "expires_at": "DATETIME",
+        }.items():
+            if column_name not in knowledge_cols:
+                conn.execute(f"ALTER TABLE bot_knowledge_files ADD COLUMN {column_name} {ddl}")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_bot_knowledge_files_review_status ON bot_knowledge_files (review_status)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_bot_knowledge_files_visibility_scope ON bot_knowledge_files (visibility_scope)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_bot_knowledge_files_owner_profile_key ON bot_knowledge_files (owner_profile_key)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_bot_knowledge_files_expires_at ON bot_knowledge_files (expires_at)")
+
+    test_cols = [row[1] for row in conn.execute("PRAGMA table_info(bot_test_cases)").fetchall()]
+    if test_cols:
+        for column_name, ddl in {
+            "required_evidence": "BOOLEAN NOT NULL DEFAULT 1",
+            "priority": "VARCHAR(20) NOT NULL DEFAULT 'P1'",
+            "last_result": "JSON",
+            "last_run_at": "DATETIME",
+        }.items():
+            if column_name not in test_cols:
+                conn.execute(f"ALTER TABLE bot_test_cases ADD COLUMN {column_name} {ddl}")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_bot_test_cases_priority ON bot_test_cases (priority)")
 
 
 def _sqlite_clean(value, limit: int, re_module) -> str | None:

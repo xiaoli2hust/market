@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Any
 
@@ -18,22 +19,39 @@ from ..auth import require_permission
 from ..database import get_db
 from ..models import (
     BotAuditLog,
+    BotActionApproval,
     BotBroadcast,
     BotChannelBinding,
+    BotCollaborationRun,
     BotConversation,
+    BotEvaluationRun,
+    BotIntentCorrection,
     BotKnowledgeFile,
     BotMessage,
     BotProfile,
     BotSkill,
     BotSkillRun,
+    BotTask,
+    BotTestCase,
     BotToolCall,
     OperationLog,
 )
 from ..services.bot_runtime import (
+    create_action_approval,
+    create_bot_task,
+    create_intent_correction,
+    create_test_case,
+    decide_action_approval,
     ensure_bot_runtime_defaults,
     extract_text_from_html,
+    handle_inbound_message,
     list_bot_runtime_overview,
     run_agent_chat,
+    run_bot_task_now,
+    run_collaboration,
+    run_test_case,
+    update_knowledge_metadata,
+    upsert_bot_profile,
     upload_knowledge_text,
 )
 from ..services.dingtalk_service import send_markdown, send_text
@@ -75,6 +93,35 @@ async def list_profiles(
     return [_profile_to_dict(row) for row in rows]
 
 
+@router.post("/profiles")
+async def create_profile(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:configure")),
+) -> dict[str, Any]:
+    """创建机器人 Profile。"""
+
+    try:
+        return await upsert_bot_profile(db, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/profiles/{profile_key}")
+async def update_profile(
+    profile_key: str,
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:configure")),
+) -> dict[str, Any]:
+    """更新机器人 Profile 身份、边界和 Skill 绑定。"""
+
+    try:
+        return await upsert_bot_profile(db, profile_key=profile_key, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/skills")
 async def list_skills(
     category: str | None = Query(default=None),
@@ -96,7 +143,7 @@ async def update_skill(
     skill_key: str,
     payload: dict[str, Any],
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_permission("bot:broadcast")),
+    _user: dict = Depends(require_permission("bot:configure")),
 ) -> dict[str, Any]:
     """启停或更新 Skill 配置。"""
 
@@ -112,6 +159,14 @@ async def update_skill(
         if payload["config"] is not None and not isinstance(payload["config"], dict):
             raise HTTPException(status_code=400, detail="Skill 配置格式不正确")
         row.config = payload["config"] or {}
+    if "trigger_scenarios" in payload and isinstance(payload["trigger_scenarios"], list):
+        row.trigger_scenarios = [str(item).strip()[:120] for item in payload["trigger_scenarios"] if str(item).strip()][:20]
+    if "evidence_rules" in payload and isinstance(payload["evidence_rules"], dict):
+        row.evidence_rules = payload["evidence_rules"]
+    if "input_contract" in payload and isinstance(payload["input_contract"], dict):
+        row.input_contract = payload["input_contract"]
+    if "output_contract" in payload and isinstance(payload["output_contract"], dict):
+        row.output_contract = payload["output_contract"]
     _log_operation(db, _user, "bot_skill_update", skill_key, f"enabled={row.enabled}")
     await db.flush()
     await db.refresh(row)
@@ -246,7 +301,7 @@ async def list_knowledge_files(
 async def create_knowledge_text(
     payload: dict[str, Any],
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_permission("bot:broadcast")),
+    _user: dict = Depends(require_permission("bot:knowledge")),
 ) -> dict[str, Any]:
     """保存一段文本到知识空间并建立切片索引。"""
 
@@ -258,6 +313,10 @@ async def create_knowledge_text(
             category=str(payload.get("category") or "general"),
             user=_user,
             source_type="manual_text",
+            owner_profile_key=payload.get("owner_profile_key"),
+            visibility_scope=str(payload.get("visibility_scope") or "all_bots"),
+            tags=payload.get("tags") if isinstance(payload.get("tags"), list) else [],
+            review_status=str(payload.get("review_status") or "approved"),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -269,7 +328,7 @@ async def upload_knowledge_file(
     category: str = Form("general"),
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
-    _user: dict = Depends(require_permission("bot:broadcast")),
+    _user: dict = Depends(require_permission("bot:knowledge")),
 ) -> dict[str, Any]:
     """上传 HTML/TXT/Markdown 文件到知识空间。"""
 
@@ -300,6 +359,21 @@ async def upload_knowledge_file(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.put("/knowledge/files/{file_id}")
+async def update_knowledge_file(
+    file_id: str,
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:knowledge")),
+) -> dict[str, Any]:
+    """更新知识生命周期状态、可见范围和标签。"""
+
+    try:
+        return await update_knowledge_metadata(db, file_id=file_id, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if "不存在" in str(exc) else 400, detail=str(exc)) from exc
+
+
 @router.post("/knowledge/search")
 async def search_knowledge(
     payload: dict[str, Any],
@@ -328,6 +402,27 @@ async def search_knowledge(
     }
 
 
+@router.post("/inbound/test")
+async def inbound_test(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    """模拟真实群聊入站消息，用于验证钉钉接入后的机器人回答链路。"""
+
+    try:
+        return await handle_inbound_message(
+            db,
+            channel_key=str(payload.get("channel_key") or "dingtalk_default"),
+            content=str(payload.get("content") or ""),
+            sender_id=str(payload.get("sender_id") or _user_id(_user) or "local_tester"),
+            sender_name=str(payload.get("sender_name") or _user_name(_user)),
+            raw_payload={"source": "manual_inbound_test"},
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/channel-bindings")
 async def list_channel_bindings(
     db: AsyncSession = Depends(get_db),
@@ -340,6 +435,65 @@ async def list_channel_bindings(
         await db.execute(select(BotChannelBinding).order_by(BotChannelBinding.created_at.desc()))
     ).scalars().all()
     return [_channel_binding_to_dict(row) for row in rows]
+
+
+@router.post("/channel-bindings")
+async def create_channel_binding(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:configure")),
+) -> dict[str, Any]:
+    """新增外部群聊与机器人绑定。"""
+
+    await ensure_bot_runtime_defaults(db)
+    channel_key = str(payload.get("channel_key") or "").strip()
+    if not channel_key:
+        channel_key = f"channel_{uuid.uuid4().hex[:8]}"
+    if (
+        await db.execute(select(BotChannelBinding).where(BotChannelBinding.channel_key == channel_key))
+    ).scalar_one_or_none():
+        raise HTTPException(status_code=400, detail="群聊标识已存在")
+    row = BotChannelBinding(
+        channel_key=channel_key[:100],
+        channel_type=str(payload.get("channel_type") or "dingtalk")[:30],
+        channel_name=str(payload.get("channel_name") or "未命名群聊")[:120],
+        bot_profile_key=str(payload.get("bot_profile_key") or "management_assistant_agent")[:80],
+        external_id=str(payload.get("external_id") or "")[:255] or None,
+        binding_config=payload.get("binding_config") if isinstance(payload.get("binding_config"), dict) else {},
+        status=str(payload.get("status") or "active")[:20],
+    )
+    db.add(row)
+    _log_operation(db, _user, "bot_channel_binding_create", row.channel_key, row.channel_name)
+    await db.flush()
+    await db.refresh(row)
+    return _channel_binding_to_dict(row)
+
+
+@router.put("/channel-bindings/{channel_key}")
+async def update_channel_binding(
+    channel_key: str,
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:configure")),
+) -> dict[str, Any]:
+    """更新群聊绑定状态或机器人 Profile。"""
+
+    row = (
+        await db.execute(select(BotChannelBinding).where(BotChannelBinding.channel_key == channel_key))
+    ).scalar_one_or_none()
+    if not row:
+        raise HTTPException(status_code=404, detail="群聊绑定不存在")
+    for field, limit in {"channel_name": 120, "channel_type": 30, "bot_profile_key": 80, "external_id": 255, "status": 20}.items():
+        if field in payload:
+            value = str(payload.get(field) or "").strip()
+            setattr(row, field, value[:limit] if value else None if field == "external_id" else getattr(row, field))
+    if "binding_config" in payload and isinstance(payload["binding_config"], dict):
+        row.binding_config = payload["binding_config"]
+    row.updated_at = datetime.now(timezone.utc)
+    _log_operation(db, _user, "bot_channel_binding_update", row.channel_key, row.status)
+    await db.flush()
+    await db.refresh(row)
+    return _channel_binding_to_dict(row)
 
 
 @router.get("/skill-runs")
@@ -389,6 +543,235 @@ async def list_audit_logs(
         )
     ).scalars().all()
     return {"total": int(total), "items": [_audit_log_to_dict(row) for row in rows]}
+
+
+@router.get("/tasks")
+async def list_tasks(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    total = (await db.execute(select(func.count(BotTask.id)))).scalar_one() or 0
+    rows = (
+        await db.execute(
+            select(BotTask).order_by(BotTask.created_at.desc()).offset((page - 1) * page_size).limit(page_size)
+        )
+    ).scalars().all()
+    return {"total": int(total), "items": [_task_to_dict(row) for row in rows]}
+
+
+@router.post("/tasks")
+async def create_task(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:configure")),
+) -> dict[str, Any]:
+    try:
+        return await create_bot_task(db, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/tasks/{task_id}/run")
+async def run_task(
+    task_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:configure")),
+) -> dict[str, Any]:
+    try:
+        return await run_bot_task_now(db, task_id=task_id, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if "不存在" in str(exc) else 400, detail=str(exc)) from exc
+
+
+@router.get("/approvals")
+async def list_approvals(
+    status: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    conditions = []
+    if status:
+        conditions.append(BotActionApproval.status == status.strip())
+    total = (await db.execute(select(func.count(BotActionApproval.id)).where(*conditions))).scalar_one() or 0
+    rows = (
+        await db.execute(
+            select(BotActionApproval)
+            .where(*conditions)
+            .order_by(BotActionApproval.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+    return {"total": int(total), "items": [_approval_to_dict(row) for row in rows]}
+
+
+@router.post("/approvals")
+async def create_approval(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:approve")),
+) -> dict[str, Any]:
+    try:
+        return await create_action_approval(db, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/approvals/{action_id}/{decision}")
+async def decide_approval(
+    action_id: str,
+    decision: str,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:approve")),
+) -> dict[str, Any]:
+    try:
+        return await decide_action_approval(db, action_id=action_id, decision=decision, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/test-cases")
+async def list_test_cases(
+    profile_key: str | None = Query(default=None),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    conditions = []
+    if profile_key:
+        conditions.append(BotTestCase.profile_key == profile_key.strip())
+    total = (await db.execute(select(func.count(BotTestCase.id)).where(*conditions))).scalar_one() or 0
+    rows = (
+        await db.execute(
+            select(BotTestCase)
+            .where(*conditions)
+            .order_by(BotTestCase.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+    return {"total": int(total), "items": [_test_case_to_dict(row) for row in rows]}
+
+
+@router.post("/test-cases")
+async def create_case(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:evaluate")),
+) -> dict[str, Any]:
+    try:
+        return await create_test_case(db, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/test-cases/{case_id}/run")
+async def run_case(
+    case_id: int,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:evaluate")),
+) -> dict[str, Any]:
+    try:
+        return await run_test_case(db, case_id=case_id, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if "不存在" in str(exc) else 400, detail=str(exc)) from exc
+
+
+@router.get("/evaluation-runs")
+async def list_evaluation_runs(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    total = (await db.execute(select(func.count(BotEvaluationRun.id)))).scalar_one() or 0
+    rows = (
+        await db.execute(
+            select(BotEvaluationRun)
+            .order_by(BotEvaluationRun.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+    return {"total": int(total), "items": [_evaluation_run_to_dict(row) for row in rows]}
+
+
+@router.get("/intent-corrections")
+async def list_intent_corrections(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> list[dict[str, Any]]:
+    rows = (
+        await db.execute(select(BotIntentCorrection).order_by(BotIntentCorrection.created_at.desc()).limit(50))
+    ).scalars().all()
+    return [_intent_correction_to_dict(row) for row in rows]
+
+
+@router.post("/intent-corrections")
+async def create_correction(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:evaluate")),
+) -> dict[str, Any]:
+    try:
+        return await create_intent_correction(db, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/collaborations")
+async def list_collaborations(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    total = (await db.execute(select(func.count(BotCollaborationRun.id)))).scalar_one() or 0
+    rows = (
+        await db.execute(
+            select(BotCollaborationRun)
+            .order_by(BotCollaborationRun.created_at.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).scalars().all()
+    return {"total": int(total), "items": [_collaboration_to_dict(row) for row in rows]}
+
+
+@router.post("/collaborations/run")
+async def create_collaboration(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:evaluate")),
+) -> dict[str, Any]:
+    try:
+        return await run_collaboration(db, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/quality-summary")
+async def quality_summary(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    total_cases = (await db.execute(select(func.count(BotTestCase.id)))).scalar_one() or 0
+    failed_runs = (await db.execute(select(func.count(BotEvaluationRun.id)).where(BotEvaluationRun.status == "failed"))).scalar_one() or 0
+    pending_actions = (await db.execute(select(func.count(BotActionApproval.id)).where(BotActionApproval.status == "pending"))).scalar_one() or 0
+    no_evidence_runs = (
+        await db.execute(select(func.count(BotSkillRun.id)).where(func.json_array_length(BotSkillRun.evidence_records) == 0))
+    ).scalar_one() or 0
+    return {
+        "test_cases": int(total_cases),
+        "failed_evaluation_runs": int(failed_runs),
+        "pending_actions": int(pending_actions),
+        "no_evidence_skill_runs": int(no_evidence_runs),
+    }
 
 
 @router.get("/broadcasts")
@@ -664,6 +1047,12 @@ def _knowledge_file_to_dict(row: BotKnowledgeFile) -> dict[str, Any]:
         "source_type": row.source_type,
         "category": row.category,
         "status": row.status,
+        "review_status": row.review_status,
+        "visibility_scope": row.visibility_scope,
+        "owner_profile_key": row.owner_profile_key,
+        "tags": row.tags or [],
+        "version": row.version,
+        "expires_at": row.expires_at.isoformat() if row.expires_at else None,
         "chunk_count": row.chunk_count,
         "uploaded_by": row.uploaded_by,
         "created_at": row.created_at.isoformat() if row.created_at else None,
@@ -732,6 +1121,108 @@ def _audit_log_to_dict(row: BotAuditLog) -> dict[str, Any]:
         "actor_name": row.actor_name,
         "payload": row.payload or {},
         "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _task_to_dict(row: BotTask) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "task_id": row.task_id,
+        "title": row.title,
+        "task_type": row.task_type,
+        "profile_key": row.profile_key,
+        "status": row.status,
+        "schedule_type": row.schedule_type,
+        "schedule_config": row.schedule_config or {},
+        "input_payload": row.input_payload or {},
+        "result_payload": row.result_payload or {},
+        "last_run_at": row.last_run_at.isoformat() if row.last_run_at else None,
+        "next_run_at": row.next_run_at.isoformat() if row.next_run_at else None,
+        "created_by_name": row.created_by_name,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _approval_to_dict(row: BotActionApproval) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "action_id": row.action_id,
+        "action_type": row.action_type,
+        "title": row.title,
+        "profile_key": row.profile_key,
+        "status": row.status,
+        "payload": row.payload or {},
+        "result_payload": row.result_payload or {},
+        "requested_by_name": row.requested_by_name,
+        "decided_by_name": row.decided_by_name,
+        "decided_at": row.decided_at.isoformat() if row.decided_at else None,
+        "executed_at": row.executed_at.isoformat() if row.executed_at else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _test_case_to_dict(row: BotTestCase) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "name": row.name,
+        "profile_key": row.profile_key,
+        "input_text": row.input_text,
+        "expected_skills": row.expected_skills or [],
+        "expected_contains": row.expected_contains or [],
+        "required_evidence": row.required_evidence,
+        "priority": row.priority,
+        "last_result": row.last_result or {},
+        "last_run_at": row.last_run_at.isoformat() if row.last_run_at else None,
+        "status": row.status,
+        "created_by_name": row.created_by_name,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _evaluation_run_to_dict(row: BotEvaluationRun) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "run_id": row.run_id,
+        "test_case_id": row.test_case_id,
+        "profile_key": row.profile_key,
+        "status": row.status,
+        "score": row.score,
+        "result_payload": row.result_payload or {},
+        "created_by_name": row.created_by_name,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _intent_correction_to_dict(row: BotIntentCorrection) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "phrase": row.phrase,
+        "profile_key": row.profile_key,
+        "expected_skills": row.expected_skills or [],
+        "notes": row.notes,
+        "status": row.status,
+        "created_by_name": row.created_by_name,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+    }
+
+
+def _collaboration_to_dict(row: BotCollaborationRun) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "run_id": row.run_id,
+        "title": row.title,
+        "lead_profile_key": row.lead_profile_key,
+        "participant_profiles": row.participant_profiles or [],
+        "input_text": row.input_text,
+        "status": row.status,
+        "result_payload": row.result_payload or {},
+        "evidence_records": row.evidence_records or [],
+        "created_by_name": row.created_by_name,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
 
 

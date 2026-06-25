@@ -22,6 +22,7 @@ import {
   ApiOutlined,
   AuditOutlined,
   BellOutlined,
+  BranchesOutlined,
   CheckCircleOutlined,
   ClockCircleOutlined,
   CloudUploadOutlined,
@@ -38,37 +39,65 @@ import {
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
+  BotActionApproval,
   BotAuditLog,
   BotBroadcastItem,
   BotBroadcastPayload,
   BotBroadcastStatus,
   BotChannelBinding,
   BotChatTestResult,
+  BotCollaborationRun,
   BotEvidenceRecord,
+  BotEvaluationRun,
+  BotIntentCorrection,
   BotKnowledgeFile,
   BotMessage,
   BotMessageType,
   BotOverview,
   BotProfile,
+  BotQualitySummary,
   BotSkill,
   BotSkillRun,
+  BotTask,
+  BotTestCase,
+  createBotApproval,
   createBotBroadcast,
+  createBotChannelBinding,
+  createBotIntentCorrection,
   createBotKnowledgeText,
+  createBotProfile,
+  createBotTask,
+  createBotTestCase,
+  decideBotApproval,
   fetchBotAuditLogs,
+  fetchBotApprovals,
   fetchBotBroadcasts,
   fetchBotChannelBindings,
+  fetchBotCollaborations,
   fetchBotConversations,
+  fetchBotEvaluationRuns,
+  fetchBotIntentCorrections,
   fetchBotKnowledgeFiles,
   fetchBotOverview,
   fetchBotProfiles,
+  fetchBotQualitySummary,
   fetchBotSkillRuns,
   fetchBotSkills,
+  fetchBotTasks,
+  fetchBotTestCases,
   getApiErrorMessage,
   getCurrentUser,
+  runBotCollaboration,
   runBotChatTest,
+  runBotInboundTest,
+  runBotTask,
+  runBotTestCase,
   searchBotKnowledge,
   sendBotBroadcast,
   sendExistingBotBroadcast,
+  updateBotChannelBinding,
+  updateBotKnowledgeFile,
+  updateBotProfile,
   updateBotSkill,
   uploadBotKnowledgeFile,
   userHasPermission,
@@ -112,6 +141,8 @@ const DEFAULT_BROADCAST_FORM: Partial<BroadcastFormValues> = {
 
 const DEFAULT_KNOWLEDGE_FORM: Partial<KnowledgeFormValues> = {
   category: 'general',
+  visibility_scope: 'all_bots',
+  review_status: 'approved',
 };
 
 const KNOWLEDGE_CATEGORIES = [
@@ -124,10 +155,63 @@ const KNOWLEDGE_CATEGORIES = [
 ];
 
 type BroadcastFormValues = BotBroadcastPayload & { notice_type?: string };
-type KnowledgeFormValues = { title: string; category: string; text_content: string };
+type KnowledgeFormValues = {
+  title: string;
+  category: string;
+  text_content: string;
+  owner_profile_key?: string;
+  visibility_scope?: string;
+  review_status?: string;
+  tags_input?: string;
+};
+type ProfileFormValues = {
+  profile_key: string;
+  name: string;
+  description?: string;
+  default_role?: string;
+  status?: string;
+  allowed_skills?: string[];
+};
+type ChannelFormValues = {
+  channel_key?: string;
+  channel_name: string;
+  channel_type?: string;
+  bot_profile_key: string;
+  external_id?: string;
+  status?: string;
+};
+type InboundFormValues = { channel_key?: string; sender_name?: string; content: string };
+type TaskFormValues = {
+  title: string;
+  task_type?: string;
+  profile_key: string;
+  schedule_type?: string;
+  prompt?: string;
+};
+type ApprovalFormValues = { title: string; action_type?: string; profile_key?: string; content?: string };
+type TestCaseFormValues = {
+  name: string;
+  profile_key: string;
+  input_text: string;
+  expected_skills?: string[];
+  expected_contains_input?: string;
+  required_evidence?: boolean;
+  priority?: string;
+};
+type CorrectionFormValues = { phrase: string; profile_key?: string; expected_skills?: string[]; notes?: string };
+type CollaborationFormValues = {
+  title?: string;
+  lead_profile_key: string;
+  participant_profiles?: string[];
+  input_text: string;
+};
 
 const BotCenter: React.FC = () => {
   const currentUser = getCurrentUser();
+  const canConfigure = userHasPermission(currentUser, 'bot:configure');
+  const canManageKnowledge = userHasPermission(currentUser, 'bot:knowledge');
+  const canApprove = userHasPermission(currentUser, 'bot:approve');
+  const canEvaluate = userHasPermission(currentUser, 'bot:evaluate');
   const canBroadcast = userHasPermission(currentUser, 'bot:broadcast');
   const [activeTab, setActiveTab] = useState('chat');
   const [loading, setLoading] = useState(false);
@@ -159,9 +243,30 @@ const BotCenter: React.FC = () => {
   const [knowledgeQuery, setKnowledgeQuery] = useState('');
   const [knowledgeSearchResult, setKnowledgeSearchResult] = useState<BotEvidenceRecord[]>([]);
 
+  const [profileForm] = Form.useForm<ProfileFormValues>();
+  const [channelForm] = Form.useForm<ChannelFormValues>();
+  const [inboundForm] = Form.useForm<InboundFormValues>();
+  const [taskForm] = Form.useForm<TaskFormValues>();
+  const [approvalForm] = Form.useForm<ApprovalFormValues>();
+  const [testCaseForm] = Form.useForm<TestCaseFormValues>();
+  const [correctionForm] = Form.useForm<CorrectionFormValues>();
+  const [collaborationForm] = Form.useForm<CollaborationFormValues>();
   const [bindings, setBindings] = useState<BotChannelBinding[]>([]);
   const [skillRuns, setSkillRuns] = useState<BotSkillRun[]>([]);
   const [auditLogs, setAuditLogs] = useState<BotAuditLog[]>([]);
+  const [inboundResult, setInboundResult] = useState<BotChatTestResult | null>(null);
+  const [tasks, setTasks] = useState<BotTask[]>([]);
+  const [taskTotal, setTaskTotal] = useState(0);
+  const [taskRunningId, setTaskRunningId] = useState<string | null>(null);
+  const [approvals, setApprovals] = useState<BotActionApproval[]>([]);
+  const [approvalTotal, setApprovalTotal] = useState(0);
+  const [testCases, setTestCases] = useState<BotTestCase[]>([]);
+  const [evaluationRuns, setEvaluationRuns] = useState<BotEvaluationRun[]>([]);
+  const [intentCorrections, setIntentCorrections] = useState<BotIntentCorrection[]>([]);
+  const [caseRunningId, setCaseRunningId] = useState<number | null>(null);
+  const [collaborations, setCollaborations] = useState<BotCollaborationRun[]>([]);
+  const [collaborationRunning, setCollaborationRunning] = useState(false);
+  const [qualitySummary, setQualitySummary] = useState<BotQualitySummary | null>(null);
 
   const loadCore = useCallback(async () => {
     setLoading(true);
@@ -223,12 +328,46 @@ const BotCenter: React.FC = () => {
     }
   }, []);
 
+  const loadGovernance = useCallback(async () => {
+    try {
+      const [
+        taskResp,
+        approvalResp,
+        caseResp,
+        evalResp,
+        correctionResp,
+        collaborationResp,
+        qualityResp,
+      ] = await Promise.all([
+        fetchBotTasks({ page: 1, page_size: PAGE_SIZE }),
+        fetchBotApprovals({ page: 1, page_size: PAGE_SIZE }),
+        fetchBotTestCases({ page: 1, page_size: PAGE_SIZE }),
+        fetchBotEvaluationRuns({ page: 1, page_size: PAGE_SIZE }),
+        fetchBotIntentCorrections(),
+        fetchBotCollaborations({ page: 1, page_size: PAGE_SIZE }),
+        fetchBotQualitySummary(),
+      ]);
+      setTasks(taskResp?.items || []);
+      setTaskTotal(taskResp?.total || 0);
+      setApprovals(approvalResp?.items || []);
+      setApprovalTotal(approvalResp?.total || 0);
+      setTestCases(caseResp?.items || []);
+      setEvaluationRuns(evalResp?.items || []);
+      setIntentCorrections(correctionResp || []);
+      setCollaborations(collaborationResp?.items || []);
+      setQualitySummary(qualityResp || null);
+    } catch {
+      // 治理信息加载失败时保留主对话能力。
+    }
+  }, []);
+
   useEffect(() => {
     loadCore();
     loadBroadcasts();
     loadKnowledge();
     loadOps();
-  }, [loadBroadcasts, loadCore, loadKnowledge, loadOps]);
+    loadGovernance();
+  }, [loadBroadcasts, loadCore, loadGovernance, loadKnowledge, loadOps]);
 
   const selectedProfileData = useMemo(
     () => profiles.find((item) => item.profile_key === selectedProfile),
@@ -239,6 +378,40 @@ const BotCenter: React.FC = () => {
     const allowed = new Set(selectedProfileData?.allowed_skills || []);
     return skills.filter((skill) => allowed.has(skill.skill_key));
   }, [selectedProfileData, skills]);
+
+  useEffect(() => {
+    if (!selectedProfileData) return;
+    profileForm.setFieldsValue({
+      profile_key: selectedProfileData.profile_key,
+      name: selectedProfileData.name,
+      description: selectedProfileData.description || '',
+      default_role: selectedProfileData.default_role || '经营管理者',
+      status: selectedProfileData.status || 'enabled',
+      allowed_skills: selectedProfileData.allowed_skills || [],
+    });
+    channelForm.setFieldsValue({ bot_profile_key: selectedProfileData.profile_key, channel_type: 'dingtalk', status: 'active' });
+    taskForm.setFieldsValue({ profile_key: selectedProfileData.profile_key, schedule_type: 'manual', task_type: 'market_digest' });
+    approvalForm.setFieldsValue({ profile_key: selectedProfileData.profile_key, action_type: 'dingtalk_broadcast' });
+    testCaseForm.setFieldsValue({ profile_key: selectedProfileData.profile_key, priority: 'P1', required_evidence: true });
+    correctionForm.setFieldsValue({ profile_key: selectedProfileData.profile_key });
+    collaborationForm.setFieldsValue({
+      lead_profile_key: selectedProfileData.profile_key,
+      participant_profiles: profiles
+        .filter((item) => item.profile_key !== selectedProfileData.profile_key)
+        .slice(0, 3)
+        .map((item) => item.profile_key),
+    });
+  }, [
+    approvalForm,
+    channelForm,
+    collaborationForm,
+    correctionForm,
+    profileForm,
+    profiles,
+    selectedProfileData,
+    taskForm,
+    testCaseForm,
+  ]);
 
   const handleChatSend = async () => {
     const text = chatInput.trim();
@@ -273,12 +446,230 @@ const BotCenter: React.FC = () => {
   };
 
   const handleToggleSkill = async (skill: BotSkill, enabled: boolean) => {
+    if (!canConfigure) return;
     try {
       const updated = await updateBotSkill(skill.skill_key, { enabled });
       setSkills((prev) => prev.map((item) => item.skill_key === updated.skill_key ? updated : item));
       message.success(enabled ? 'Skill 已启用' : 'Skill 已停用');
     } catch (e: any) {
       message.error(getApiErrorMessage(e, '更新 Skill 失败'));
+    }
+  };
+
+  const handleSaveProfile = async () => {
+    if (!canConfigure) return;
+    try {
+      const values = await profileForm.validateFields();
+      const payload = {
+        profile_key: values.profile_key?.trim(),
+        name: values.name?.trim(),
+        description: values.description?.trim(),
+        default_role: values.default_role?.trim(),
+        status: values.status || 'active',
+        allowed_skills: values.allowed_skills || [],
+      };
+      const exists = profiles.some((item) => item.profile_key === payload.profile_key);
+      const saved = exists
+        ? await updateBotProfile(payload.profile_key, payload)
+        : await createBotProfile(payload);
+      setSelectedProfile(saved.profile_key);
+      await loadCore();
+      message.success(exists ? '机器人配置已更新' : '机器人 Profile 已创建');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '保存机器人配置失败'));
+    }
+  };
+
+  const handleSaveChannelBinding = async () => {
+    if (!canConfigure) return;
+    try {
+      const values = await channelForm.validateFields();
+      const payload = {
+        channel_key: values.channel_key?.trim(),
+        channel_name: values.channel_name.trim(),
+        channel_type: values.channel_type || 'dingtalk',
+        bot_profile_key: values.bot_profile_key || selectedProfile,
+        external_id: values.external_id?.trim(),
+        status: values.status || 'active',
+        binding_config: { source: '机器人中心配置' },
+      };
+      const exists = payload.channel_key
+        ? bindings.some((item) => item.channel_key === payload.channel_key)
+        : false;
+      if (exists && payload.channel_key) {
+        await updateBotChannelBinding(payload.channel_key, payload);
+      } else {
+        await createBotChannelBinding(payload);
+      }
+      channelForm.resetFields(['channel_key', 'channel_name', 'external_id']);
+      await loadOps();
+      message.success(exists ? '群聊绑定已更新' : '群聊绑定已新增');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '保存群聊绑定失败'));
+    }
+  };
+
+  const handleInboundTest = async () => {
+    try {
+      const values = await inboundForm.validateFields();
+      const result = await runBotInboundTest({
+        channel_key: values.channel_key || bindings[0]?.channel_key || 'dingtalk_default',
+        sender_name: values.sender_name || currentUser?.name || '测试用户',
+        content: values.content.trim(),
+      });
+      setInboundResult(result);
+      await Promise.all([loadCore(), loadOps()]);
+      message.success('群聊入站测试完成');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '群聊入站测试失败'));
+    }
+  };
+
+  const handleCreateTask = async () => {
+    if (!canConfigure) return;
+    try {
+      const values = await taskForm.validateFields();
+      await createBotTask({
+        title: values.title.trim(),
+        task_type: values.task_type || 'custom_prompt',
+        profile_key: values.profile_key || selectedProfile,
+        schedule_type: values.schedule_type || 'manual',
+        input_payload: values.prompt ? { prompt: values.prompt.trim() } : {},
+      });
+      taskForm.resetFields(['title', 'prompt']);
+      await Promise.all([loadCore(), loadGovernance(), loadOps()]);
+      message.success('机器人任务已创建');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '创建任务失败'));
+    }
+  };
+
+  const handleRunTask = async (record: BotTask) => {
+    if (!canConfigure) return;
+    setTaskRunningId(record.task_id);
+    try {
+      await runBotTask(record.task_id);
+      await Promise.all([loadCore(), loadGovernance(), loadOps()]);
+      message.success('任务已运行，结果已写入任务记录');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '运行任务失败'));
+    } finally {
+      setTaskRunningId(null);
+    }
+  };
+
+  const handleCreateApproval = async () => {
+    if (!canApprove) return;
+    try {
+      const values = await approvalForm.validateFields();
+      await createBotApproval({
+        title: values.title.trim(),
+        action_type: values.action_type || 'dingtalk_broadcast',
+        profile_key: values.profile_key || selectedProfile,
+        payload: { content: values.content?.trim() || '', created_from: 'bot_center' },
+      });
+      approvalForm.resetFields(['title', 'content']);
+      await loadGovernance();
+      message.success('待审批动作已创建');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '创建审批动作失败'));
+    }
+  };
+
+  const handleDecideApproval = async (record: BotActionApproval, decision: 'approve' | 'reject' | 'execute') => {
+    if (!canApprove) return;
+    try {
+      await decideBotApproval(record.action_id, decision);
+      await Promise.all([loadCore(), loadGovernance()]);
+      message.success(decision === 'approve' ? '已通过审批' : decision === 'reject' ? '已驳回' : '已标记执行');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '审批操作失败'));
+    }
+  };
+
+  const handleCreateTestCase = async () => {
+    if (!canEvaluate) return;
+    try {
+      const values = await testCaseForm.validateFields();
+      await createBotTestCase({
+        name: values.name.trim(),
+        profile_key: values.profile_key || selectedProfile,
+        input_text: values.input_text.trim(),
+        expected_skills: values.expected_skills || [],
+        expected_contains: splitTextList(values.expected_contains_input),
+        required_evidence: values.required_evidence !== false,
+        priority: values.priority || 'P1',
+      });
+      testCaseForm.resetFields(['name', 'input_text', 'expected_contains_input', 'expected_skills']);
+      await loadGovernance();
+      message.success('评测用例已创建');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '创建评测用例失败'));
+    }
+  };
+
+  const handleRunCase = async (record: BotTestCase) => {
+    if (!canEvaluate) return;
+    setCaseRunningId(record.id);
+    try {
+      const result = await runBotTestCase(record.id);
+      await Promise.all([loadCore(), loadGovernance(), loadOps()]);
+      if (result.run.status === 'passed') message.success('评测通过');
+      else message.warning('评测未通过，请查看失败项并补充纠错或知识');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '运行评测失败'));
+    } finally {
+      setCaseRunningId(null);
+    }
+  };
+
+  const handleCreateCorrection = async () => {
+    if (!canEvaluate) return;
+    try {
+      const values = await correctionForm.validateFields();
+      await createBotIntentCorrection({
+        phrase: values.phrase.trim(),
+        profile_key: values.profile_key || selectedProfile,
+        expected_skills: values.expected_skills || [],
+        notes: values.notes?.trim(),
+      });
+      correctionForm.resetFields(['phrase', 'expected_skills', 'notes']);
+      await loadGovernance();
+      message.success('意图纠错已生效');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '保存意图纠错失败'));
+    }
+  };
+
+  const handleRunCollaboration = async () => {
+    if (!canEvaluate) return;
+    setCollaborationRunning(true);
+    try {
+      const values = await collaborationForm.validateFields();
+      await runBotCollaboration({
+        title: values.title?.trim(),
+        lead_profile_key: values.lead_profile_key || selectedProfile,
+        participant_profiles: values.participant_profiles || [],
+        input_text: values.input_text.trim(),
+      });
+      collaborationForm.resetFields(['title', 'input_text']);
+      await Promise.all([loadCore(), loadGovernance(), loadOps()]);
+      message.success('多机器人协作已完成');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '运行协作失败'));
+    } finally {
+      setCollaborationRunning(false);
+    }
+  };
+
+  const handleUpdateKnowledgeStatus = async (record: BotKnowledgeFile, payload: Partial<BotKnowledgeFile>) => {
+    if (!canManageKnowledge) return;
+    try {
+      await updateBotKnowledgeFile(record.file_id, payload);
+      await loadKnowledge();
+      message.success('知识状态已更新');
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '更新知识状态失败'));
     }
   };
 
@@ -351,11 +742,19 @@ const BotCenter: React.FC = () => {
   };
 
   const handleCreateKnowledge = async () => {
-    if (!canBroadcast) return;
+    if (!canManageKnowledge) return;
     setKnowledgeUploading(true);
     try {
       const values = await knowledgeForm.validateFields();
-      await createBotKnowledgeText(values);
+      await createBotKnowledgeText({
+        title: values.title.trim(),
+        category: values.category || 'general',
+        text_content: values.text_content?.trim() || '',
+        owner_profile_key: values.owner_profile_key,
+        visibility_scope: values.visibility_scope || 'all_bots',
+        review_status: values.review_status || 'approved',
+        tags: splitTextList(values.tags_input),
+      });
       knowledgeForm.resetFields();
       knowledgeForm.setFieldsValue(DEFAULT_KNOWLEDGE_FORM);
       await loadKnowledge();
@@ -368,7 +767,7 @@ const BotCenter: React.FC = () => {
   };
 
   const handleUploadKnowledge = async () => {
-    if (!canBroadcast || !knowledgeFile) {
+    if (!canManageKnowledge || !knowledgeFile) {
       message.warning('请选择要上传的知识文件');
       return;
     }
@@ -376,7 +775,13 @@ const BotCenter: React.FC = () => {
     try {
       const title = knowledgeForm.getFieldValue('title') || knowledgeFile.name;
       const category = knowledgeForm.getFieldValue('category') || 'general';
-      await uploadBotKnowledgeFile({ title, category, file: knowledgeFile });
+      const saved = await uploadBotKnowledgeFile({ title, category, file: knowledgeFile });
+      await updateBotKnowledgeFile(saved.file_id, {
+        owner_profile_key: knowledgeForm.getFieldValue('owner_profile_key'),
+        visibility_scope: knowledgeForm.getFieldValue('visibility_scope') || 'all_bots',
+        review_status: knowledgeForm.getFieldValue('review_status') || 'approved',
+        tags: splitTextList(knowledgeForm.getFieldValue('tags_input')),
+      });
       setKnowledgeFile(null);
       await loadKnowledge();
       message.success('知识文件已上传并建立索引');
@@ -402,6 +807,8 @@ const BotCenter: React.FC = () => {
   };
 
   const profileOptions = profiles.map((item) => ({ value: item.profile_key, label: item.name }));
+  const skillOptions = skills.map((item) => ({ value: item.skill_key, label: item.name }));
+  const bindingOptions = bindings.map((item) => ({ value: item.channel_key, label: item.channel_name }));
 
   return (
     <div className="bot-center">
@@ -421,6 +828,7 @@ const BotCenter: React.FC = () => {
           { label: '机器人 Profile', value: `${overview?.profiles ?? profiles.length} 个`, status: 'good', meta: '身份、边界和 Skill 绑定' },
           { label: '已启用 Skill', value: `${overview?.enabled_skills ?? skills.filter((item) => item.enabled).length} 个`, status: 'good', meta: '受控能力包，不靠 Prompt 硬猜' },
           { label: '知识文件', value: `${overview?.knowledge_files ?? knowledgeTotal} 份`, status: knowledgeTotal ? 'good' : 'warn', meta: '可追溯检索来源' },
+          { label: '待审批动作', value: `${overview?.pending_approvals ?? qualitySummary?.pending_actions ?? 0} 个`, status: (overview?.pending_approvals ?? 0) ? 'warn' : 'good', meta: '外部动作先审批再执行' },
           { label: '最近运行', value: overview?.latest_run_at ? formatTime(overview.latest_run_at) : '暂无', status: overview?.latest_run_at ? 'muted' : 'warn', meta: '每次调用都有日志' },
         ]}
       />
@@ -429,8 +837,8 @@ const BotCenter: React.FC = () => {
         metrics={[
           { label: '当前机器人', value: selectedProfileData?.name || '未选择', icon: <RobotOutlined />, tone: 'blue', hint: selectedProfileData?.description || '选择一个机器人开始测试' },
           { label: '绑定 Skill', value: boundSkills.length, icon: <ToolOutlined />, tone: 'purple', hint: '只调用已绑定且已启用的 Skill' },
-          { label: '群聊绑定', value: bindings.length, icon: <TeamOutlined />, tone: 'green', hint: '钉钉群与机器人 Profile 的关系' },
-          { label: '群发记录', value: broadcastTotal, icon: <BellOutlined />, tone: 'gold', hint: '消息群发仍是受控动作' },
+          { label: '自动任务', value: overview?.active_tasks ?? taskTotal, icon: <ClockCircleOutlined />, tone: 'green', hint: '可手动运行，后续接调度器' },
+          { label: '评测风险', value: qualitySummary?.failed_evaluation_runs ?? overview?.failed_evaluations ?? 0, icon: <AuditOutlined />, tone: 'gold', hint: '失败用例进入纠错闭环' },
         ]}
       />
 
@@ -438,12 +846,15 @@ const BotCenter: React.FC = () => {
         activeKey={activeTab}
         onChange={setActiveTab}
         items={[
-          { key: 'chat', label: '对话测试台', children: renderChatTab() },
-          { key: 'skills', label: 'Skill 管理', children: renderSkillsTab() },
-          { key: 'knowledge', label: '知识空间', children: renderKnowledgeTab() },
-          { key: 'channels', label: '群聊接入', children: renderChannelsTab() },
-          { key: 'broadcast', label: '消息群发', children: renderBroadcastTab() },
-          { key: 'logs', label: '运行日志', children: renderLogsTab() },
+          { key: 'chat', label: '对话测试台', forceRender: true, children: renderChatTab() },
+          { key: 'skills', label: '配置运营', forceRender: true, children: renderSkillsTab() },
+          { key: 'knowledge', label: '知识空间', forceRender: true, children: renderKnowledgeTab() },
+          { key: 'channels', label: '群聊接入', forceRender: true, children: renderChannelsTab() },
+          { key: 'tasks', label: '任务审批', forceRender: true, children: renderTasksTab() },
+          { key: 'evaluation', label: '评测纠错', forceRender: true, children: renderEvaluationTab() },
+          { key: 'collaboration', label: '协作治理', forceRender: true, children: renderCollaborationTab() },
+          { key: 'broadcast', label: '消息群发', forceRender: true, children: renderBroadcastTab() },
+          { key: 'logs', label: '运行日志', forceRender: true, children: renderLogsTab() },
         ]}
       />
     </div>
@@ -522,42 +933,73 @@ const BotCenter: React.FC = () => {
 
   function renderSkillsTab() {
     return (
-      <WorkbenchSection title="Skill 管理" description="Skill 是机器人能力包；这里管理启停、契约、证据要求和最近运行。">
-        <Table
-          className="edl-table"
-          rowKey="skill_key"
-          dataSource={skills}
-          pagination={false}
-          scroll={{ x: 980 }}
-          columns={[
-            {
-              title: 'Skill',
-              width: 260,
-              render: (_: unknown, record: BotSkill) => (
-                <div className="bot-table-title">
-                  <strong>{record.name}</strong>
-                  <span>{record.skill_key}</span>
-                </div>
-              ),
-            },
-            { title: '分类', dataIndex: 'category', width: 110, render: (value: string) => <Tag>{value}</Tag> },
-            { title: '触发场景', dataIndex: 'trigger_scenarios', render: (value: string[]) => <span>{(value || []).join('；')}</span> },
-            { title: '权限', dataIndex: 'required_permission', width: 150, render: (value: string) => value ? <Tag color="blue">{value}</Tag> : <Tag>无</Tag> },
-            {
-              title: '状态',
-              width: 120,
-              render: (_: unknown, record: BotSkill) => (
-                <Switch
-                  data-testid={`bot-skill-switch-${record.skill_key}`}
-                  checked={record.enabled}
-                  onChange={(checked) => handleToggleSkill(record, checked)}
-                  disabled={!canBroadcast}
-                />
-              ),
-            },
-          ]}
-        />
-      </WorkbenchSection>
+      <div className="bot-config-grid">
+        <WorkbenchSection title="机器人 Profile" description="定义机器人身份、默认角色、可调用 Skill 和运营状态。">
+          {!canConfigure && <Alert className="bot-permission-alert" type="warning" showIcon message="当前账号只能查看机器人配置。" />}
+          <Form<ProfileFormValues> form={profileForm} layout="vertical" disabled={!canConfigure}>
+            <div className="bot-form-row">
+              <Form.Item label="机器人标识" name="profile_key" rules={[{ required: true, message: '请输入机器人标识' }]}>
+                <Input placeholder="例如：market_intelligence_agent" />
+              </Form.Item>
+              <Form.Item label="机器人名称" name="name" rules={[{ required: true, message: '请输入机器人名称' }]}>
+                <Input placeholder="例如：市场洞察机器人" />
+              </Form.Item>
+            </div>
+            <div className="bot-form-row">
+              <Form.Item label="默认提问身份" name="default_role">
+                <Input placeholder="例如：市场部管理者" />
+              </Form.Item>
+              <Form.Item label="状态" name="status">
+                <Select options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
+              </Form.Item>
+            </div>
+            <Form.Item label="可调用 Skill" name="allowed_skills">
+              <Select mode="multiple" options={skillOptions} placeholder="选择这个机器人能调用的 Skill" />
+            </Form.Item>
+            <Form.Item label="职责描述" name="description">
+              <Input.TextArea rows={4} placeholder="面向业务管理者描述这个机器人负责什么、不能做什么" />
+            </Form.Item>
+            <Button type="primary" icon={<SaveOutlined />} onClick={handleSaveProfile}>保存机器人配置</Button>
+          </Form>
+        </WorkbenchSection>
+
+        <WorkbenchSection title="Skill 管理" description="Skill 是机器人能力包；这里管理启停、契约、证据要求和最近运行。">
+          <Table
+            className="edl-table"
+            rowKey="skill_key"
+            dataSource={skills}
+            pagination={false}
+            scroll={{ x: 980 }}
+            columns={[
+              {
+                title: 'Skill',
+                width: 260,
+                render: (_: unknown, record: BotSkill) => (
+                  <div className="bot-table-title">
+                    <strong>{record.name}</strong>
+                    <span>{record.skill_key}</span>
+                  </div>
+                ),
+              },
+              { title: '分类', dataIndex: 'category', width: 110, render: (value: string) => <Tag>{value}</Tag> },
+              { title: '触发场景', dataIndex: 'trigger_scenarios', render: (value: string[]) => <span>{(value || []).join('；')}</span> },
+              { title: '权限', dataIndex: 'required_permission', width: 150, render: (value: string) => value ? <Tag color="blue">{value}</Tag> : <Tag>无</Tag> },
+              {
+                title: '状态',
+                width: 120,
+                render: (_: unknown, record: BotSkill) => (
+                  <Switch
+                    data-testid={`bot-skill-switch-${record.skill_key}`}
+                    checked={record.enabled}
+                    onChange={(checked) => handleToggleSkill(record, checked)}
+                    disabled={!canConfigure}
+                  />
+                ),
+              },
+            ]}
+          />
+        </WorkbenchSection>
+      </div>
     );
   }
 
@@ -565,11 +1007,11 @@ const BotCenter: React.FC = () => {
     return (
       <div className="bot-knowledge-grid">
         <WorkbenchSection title="知识入库" description="支持文本、HTML、Markdown、TXT；入库后会切片并用于测试台检索。">
-          {!canBroadcast && <Alert type="warning" showIcon message="当前账号只能查看知识，不能新增知识。" />}
+          {!canManageKnowledge && <Alert type="warning" showIcon message="当前账号只能查看知识，不能新增知识。" />}
           <Form<KnowledgeFormValues>
             form={knowledgeForm}
             layout="vertical"
-            disabled={!canBroadcast}
+            disabled={!canManageKnowledge}
             initialValues={DEFAULT_KNOWLEDGE_FORM}
           >
             <div className="bot-form-row">
@@ -580,7 +1022,30 @@ const BotCenter: React.FC = () => {
                 <Select options={KNOWLEDGE_CATEGORIES} />
               </Form.Item>
             </div>
-            <Form.Item label="文本内容" name="text_content">
+            <div className="bot-form-row">
+              <Form.Item label="归属机器人" name="owner_profile_key">
+                <Select allowClear options={profileOptions} placeholder="不选表示所有机器人可用" />
+              </Form.Item>
+              <Form.Item label="可见范围" name="visibility_scope">
+                <Select options={[
+                  { value: 'all_bots', label: '全部机器人' },
+                  { value: 'profile_only', label: '仅归属机器人' },
+                ]} />
+              </Form.Item>
+            </div>
+            <div className="bot-form-row">
+              <Form.Item label="审核状态" name="review_status">
+                <Select options={[
+                  { value: 'approved', label: '可用于回答' },
+                  { value: 'pending', label: '待审核' },
+                  { value: 'rejected', label: '不采用' },
+                ]} />
+              </Form.Item>
+              <Form.Item label="标签" name="tags_input">
+                <Input placeholder="用逗号分隔，例如：空间数据,公安,方案" />
+              </Form.Item>
+            </div>
+            <Form.Item label="文本内容" name="text_content" rules={[{ required: !knowledgeFile, message: '请输入文本内容，或选择文件上传' }]}>
               <Input.TextArea
                 data-testid="bot-knowledge-content"
                 rows={7}
@@ -626,12 +1091,26 @@ const BotCenter: React.FC = () => {
             rowKey="file_id"
             dataSource={knowledgeFiles}
             pagination={false}
+            scroll={{ x: 980 }}
             columns={[
-              { title: '标题', dataIndex: 'title' },
+              { title: '标题', dataIndex: 'title', render: (_: string, record: BotKnowledgeFile) => <div className="bot-table-title"><strong>{record.title}</strong><span>{record.tags?.join('、') || record.file_name || record.source_type}</span></div> },
               { title: '分类', dataIndex: 'category', width: 120, render: (value: string) => <Tag>{value}</Tag> },
+              { title: '状态', dataIndex: 'status', width: 110, render: (value: string) => <Tag color={value === 'indexed' ? 'success' : 'default'}>{value}</Tag> },
+              { title: '审核', dataIndex: 'review_status', width: 120, render: (value: string) => <Tag color={value === 'approved' ? 'success' : value === 'pending' ? 'processing' : 'default'}>{value || 'approved'}</Tag> },
+              { title: '范围', dataIndex: 'visibility_scope', width: 130, render: (value: string) => value || 'all_bots' },
               { title: '切片', dataIndex: 'chunk_count', width: 90 },
               { title: '上传人', dataIndex: 'uploaded_by', width: 120 },
               { title: '时间', dataIndex: 'created_at', width: 170, render: formatTime },
+              {
+                title: '操作',
+                width: 170,
+                render: (_: unknown, record: BotKnowledgeFile) => (
+                  <Space wrap>
+                    <Button size="small" disabled={!canManageKnowledge || (record.review_status === 'approved' && record.status === 'indexed')} onClick={() => handleUpdateKnowledgeStatus(record, { status: 'indexed', review_status: 'approved' })}>启用</Button>
+                    <Button size="small" disabled={!canManageKnowledge || record.status === 'archived'} onClick={() => handleUpdateKnowledgeStatus(record, { status: 'archived', review_status: 'rejected' })}>归档</Button>
+                  </Space>
+                ),
+              },
             ]}
           />
         </WorkbenchSection>
@@ -641,21 +1120,350 @@ const BotCenter: React.FC = () => {
 
   function renderChannelsTab() {
     return (
-      <WorkbenchSection title="群聊接入" description="这里管理外部群与机器人 Profile 的绑定关系；默认钉钉群来自管理中心钉钉配置。">
-        <Table
-          className="edl-table"
-          rowKey="channel_key"
-          dataSource={bindings}
-          pagination={false}
-          columns={[
-            { title: '群聊', dataIndex: 'channel_name' },
-            { title: '类型', dataIndex: 'channel_type', width: 120, render: (value: string) => <Tag color="blue">{value}</Tag> },
-            { title: '绑定机器人', dataIndex: 'bot_profile_key', render: (value: string) => profiles.find((item) => item.profile_key === value)?.name || value },
-            { title: '状态', dataIndex: 'status', width: 100, render: (value: string) => <Tag color={value === 'active' ? 'success' : 'default'}>{value}</Tag> },
-            { title: '配置来源', dataIndex: 'binding_config', render: (value: Record<string, any>) => value?.source || '—' },
-          ]}
-        />
-      </WorkbenchSection>
+      <div className="bot-channel-grid">
+        <WorkbenchSection title="群聊绑定" description="把钉钉群、内部测试群或其他外部会话绑定到指定机器人。">
+          {!canConfigure && <Alert className="bot-permission-alert" type="warning" showIcon message="当前账号只能查看群聊绑定。" />}
+          <Form<ChannelFormValues> form={channelForm} layout="vertical" disabled={!canConfigure}>
+            <div className="bot-form-row">
+              <Form.Item label="群聊标识" name="channel_key">
+                <Input placeholder="不填则自动生成；已有标识会更新绑定" />
+              </Form.Item>
+              <Form.Item label="群聊名称" name="channel_name" rules={[{ required: true, message: '请输入群聊名称' }]}>
+                <Input placeholder="例如：市场洞察工作群" />
+              </Form.Item>
+            </div>
+            <div className="bot-form-row">
+              <Form.Item label="渠道类型" name="channel_type">
+                <Select options={[{ value: 'dingtalk', label: '钉钉' }, { value: 'test_console', label: '测试入口' }, { value: 'webhook', label: 'Webhook' }]} />
+              </Form.Item>
+              <Form.Item label="绑定机器人" name="bot_profile_key" rules={[{ required: true, message: '请选择机器人' }]}>
+                <Select options={profileOptions} />
+              </Form.Item>
+            </div>
+            <div className="bot-form-row">
+              <Form.Item label="外部会话 ID" name="external_id">
+                <Input placeholder="钉钉 openConversationId，可为空" />
+              </Form.Item>
+              <Form.Item label="状态" name="status">
+                <Select options={[{ value: 'active', label: '启用' }, { value: 'disabled', label: '停用' }]} />
+              </Form.Item>
+            </div>
+            <Button type="primary" icon={<SaveOutlined />} onClick={handleSaveChannelBinding}>保存群聊绑定</Button>
+          </Form>
+        </WorkbenchSection>
+
+        <WorkbenchSection title="入站消息测试" description="模拟群成员发消息，验证绑定机器人、Skill 调用和证据链。">
+          <Form<InboundFormValues> form={inboundForm} layout="vertical">
+            <div className="bot-form-row">
+              <Form.Item label="测试群聊" name="channel_key">
+                <Select allowClear options={bindingOptions} placeholder="默认使用第一个启用群聊" />
+              </Form.Item>
+              <Form.Item label="发送人" name="sender_name">
+                <Input placeholder={currentUser?.name || '测试用户'} />
+              </Form.Item>
+            </div>
+            <Form.Item label="群聊消息" name="content" rules={[{ required: true, message: '请输入群聊消息' }]}>
+              <Input.TextArea rows={4} placeholder="例如：帮我看一下本周公安空间数据相关机会有什么变化" />
+            </Form.Item>
+            <Button type="primary" icon={<SendOutlined />} onClick={handleInboundTest}>发送入站测试</Button>
+          </Form>
+          {inboundResult && (
+            <div className="bot-preview-answer">
+              <strong>机器人回复</strong>
+              <p>{inboundResult.assistant_message.content}</p>
+              <span>{inboundResult.selected_skills?.length || 0} 个 Skill · {inboundResult.evidence_records?.length || 0} 条证据</span>
+            </div>
+          )}
+        </WorkbenchSection>
+
+        <WorkbenchSection title="绑定列表" description="停用的群聊不会参与真实入站消息路由。" className="bot-span-all">
+          <Table
+            className="edl-table"
+            rowKey="channel_key"
+            dataSource={bindings}
+            pagination={false}
+            scroll={{ x: 980 }}
+            columns={[
+              { title: '群聊', dataIndex: 'channel_name' },
+              { title: '标识', dataIndex: 'channel_key', width: 180 },
+              { title: '类型', dataIndex: 'channel_type', width: 120, render: (value: string) => <Tag color="blue">{value}</Tag> },
+              { title: '绑定机器人', dataIndex: 'bot_profile_key', render: (value: string) => profiles.find((item) => item.profile_key === value)?.name || value },
+              { title: '状态', dataIndex: 'status', width: 100, render: (value: string) => <Tag color={value === 'active' ? 'success' : 'default'}>{value}</Tag> },
+              { title: '最后消息', dataIndex: 'last_seen_at', width: 170, render: formatTime },
+            ]}
+          />
+        </WorkbenchSection>
+      </div>
+    );
+  }
+
+  function renderTasksTab() {
+    return (
+      <div className="bot-governance-grid">
+        <WorkbenchSection title="自动任务" description="把市场简报、周报总结、商机跟进等工作配置成可运行任务。">
+          {!canConfigure && <Alert className="bot-permission-alert" type="warning" showIcon message="当前账号只能查看任务。" />}
+          <Form<TaskFormValues> form={taskForm} layout="vertical" disabled={!canConfigure}>
+            <div className="bot-form-row">
+              <Form.Item label="任务名称" name="title" rules={[{ required: true, message: '请输入任务名称' }]}>
+                <Input placeholder="例如：每周市场洞察简报" />
+              </Form.Item>
+              <Form.Item label="任务类型" name="task_type">
+                <Select options={[
+                  { value: 'market_digest', label: '市场洞察简报' },
+                  { value: 'weekly_summary', label: '周报归档总结' },
+                  { value: 'opportunity_followup', label: '商机跟进提醒' },
+                  { value: 'custom_prompt', label: '自定义任务' },
+                ]} />
+              </Form.Item>
+            </div>
+            <div className="bot-form-row">
+              <Form.Item label="执行机器人" name="profile_key" rules={[{ required: true, message: '请选择机器人' }]}>
+                <Select options={profileOptions} />
+              </Form.Item>
+              <Form.Item label="调度方式" name="schedule_type">
+                <Select options={[{ value: 'manual', label: '手动运行' }, { value: 'daily', label: '每日' }, { value: 'weekly', label: '每周' }]} />
+              </Form.Item>
+            </div>
+            <Form.Item label="任务指令" name="prompt">
+              <Input.TextArea rows={4} placeholder="不填写时使用任务类型内置指令；填写后按此指令运行" />
+            </Form.Item>
+            <Button type="primary" icon={<SaveOutlined />} onClick={handleCreateTask}>创建任务</Button>
+          </Form>
+        </WorkbenchSection>
+
+        <WorkbenchSection title="动作审批" description="机器人准备执行群发、外部调用等动作时，先进入审批队列。">
+          {!canApprove && <Alert className="bot-permission-alert" type="warning" showIcon message="当前账号没有审批权限。" />}
+          <Form<ApprovalFormValues> form={approvalForm} layout="vertical" disabled={!canApprove}>
+            <div className="bot-form-row">
+              <Form.Item label="动作标题" name="title" rules={[{ required: true, message: '请输入动作标题' }]}>
+                <Input placeholder="例如：发送本周市场洞察摘要" />
+              </Form.Item>
+              <Form.Item label="动作类型" name="action_type">
+                <Select options={[{ value: 'dingtalk_broadcast', label: '钉钉群发' }, { value: 'external_api', label: '外部接口' }, { value: 'data_update', label: '数据更新' }]} />
+              </Form.Item>
+            </div>
+            <Form.Item label="关联机器人" name="profile_key">
+              <Select allowClear options={profileOptions} />
+            </Form.Item>
+            <Form.Item label="动作内容" name="content">
+              <Input.TextArea rows={4} placeholder="描述机器人希望执行什么动作，审批后仍会保留审计记录" />
+            </Form.Item>
+            <Button type="primary" icon={<AuditOutlined />} onClick={handleCreateApproval}>提交审批</Button>
+          </Form>
+        </WorkbenchSection>
+
+        <WorkbenchSection title={`任务列表（${taskTotal}）`} description="手动运行会真实调用机器人并写入运行结果。" className="bot-span-all">
+          <Table
+            className="edl-table"
+            rowKey="task_id"
+            dataSource={tasks}
+            pagination={false}
+            scroll={{ x: 1080 }}
+            columns={[
+              { title: '任务', dataIndex: 'title', render: (_: string, record: BotTask) => <div className="bot-table-title"><strong>{record.title}</strong><span>{record.task_id}</span></div> },
+              { title: '类型', dataIndex: 'task_type', width: 150, render: (value: string) => <Tag>{value}</Tag> },
+              { title: '机器人', dataIndex: 'profile_key', width: 180, render: (value: string) => profiles.find((item) => item.profile_key === value)?.name || value },
+              { title: '状态', dataIndex: 'status', width: 100, render: (value: string) => <Tag color={value === 'enabled' ? 'success' : 'default'}>{value}</Tag> },
+              { title: '上次运行', dataIndex: 'last_run_at', width: 170, render: formatTime },
+              { title: '证据', dataIndex: 'result_payload', width: 90, render: (value: Record<string, any>) => value?.evidence_count ?? '—' },
+              {
+                title: '操作',
+                width: 110,
+                render: (_: unknown, record: BotTask) => (
+                  <Button size="small" icon={<ClockCircleOutlined />} loading={taskRunningId === record.task_id} disabled={!canConfigure} onClick={() => handleRunTask(record)}>
+                    运行
+                  </Button>
+                ),
+              },
+            ]}
+          />
+        </WorkbenchSection>
+
+        <WorkbenchSection title={`审批队列（${approvalTotal}）`} description="通过、驳回、执行都会写入审计。" className="bot-span-all">
+          <Table
+            className="edl-table"
+            rowKey="action_id"
+            dataSource={approvals}
+            pagination={false}
+            scroll={{ x: 1080 }}
+            columns={[
+              { title: '动作', dataIndex: 'title', render: (_: string, record: BotActionApproval) => <div className="bot-table-title"><strong>{record.title}</strong><span>{record.action_id}</span></div> },
+              { title: '类型', dataIndex: 'action_type', width: 150, render: (value: string) => <Tag>{value}</Tag> },
+              { title: '状态', dataIndex: 'status', width: 110, render: (value: string) => <Tag color={value === 'pending' ? 'processing' : value === 'approved' ? 'success' : value === 'rejected' ? 'error' : 'default'}>{value}</Tag> },
+              { title: '申请人', dataIndex: 'requested_by_name', width: 120 },
+              { title: '时间', dataIndex: 'created_at', width: 170, render: formatTime },
+              {
+                title: '操作',
+                width: 220,
+                render: (_: unknown, record: BotActionApproval) => (
+                  <Space wrap>
+                    <Button size="small" disabled={!canApprove || record.status !== 'pending'} onClick={() => handleDecideApproval(record, 'approve')}>通过</Button>
+                    <Button size="small" danger disabled={!canApprove || record.status !== 'pending'} onClick={() => handleDecideApproval(record, 'reject')}>驳回</Button>
+                    <Button size="small" type="primary" disabled={!canApprove || record.status !== 'approved'} onClick={() => handleDecideApproval(record, 'execute')}>执行</Button>
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        </WorkbenchSection>
+      </div>
+    );
+  }
+
+  function renderEvaluationTab() {
+    return (
+      <div className="bot-governance-grid">
+        <WorkbenchSection title="评测用例" description="固定高频问题，检查机器人是否调用正确 Skill、是否给出证据。">
+          {!canEvaluate && <Alert className="bot-permission-alert" type="warning" showIcon message="当前账号只能查看评测结果。" />}
+          <div className="bot-quality-strip">
+            <span>用例 {qualitySummary?.test_cases ?? testCases.length}</span>
+            <span>失败 {qualitySummary?.failed_evaluation_runs ?? 0}</span>
+            <span>无证据调用 {qualitySummary?.no_evidence_skill_runs ?? 0}</span>
+          </div>
+          <Form<TestCaseFormValues> form={testCaseForm} layout="vertical" disabled={!canEvaluate}>
+            <div className="bot-form-row">
+              <Form.Item label="用例名称" name="name" rules={[{ required: true, message: '请输入用例名称' }]}>
+                <Input placeholder="例如：公安空间数据机会分析" />
+              </Form.Item>
+              <Form.Item label="机器人" name="profile_key" rules={[{ required: true, message: '请选择机器人' }]}>
+                <Select options={profileOptions} />
+              </Form.Item>
+            </div>
+            <Form.Item label="测试问题" name="input_text" rules={[{ required: true, message: '请输入测试问题' }]}>
+              <Input.TextArea rows={4} placeholder="输入真实用户会问的问题" />
+            </Form.Item>
+            <div className="bot-form-row">
+              <Form.Item label="期望 Skill" name="expected_skills">
+                <Select mode="multiple" options={skillOptions} />
+              </Form.Item>
+              <Form.Item label="优先级" name="priority">
+                <Select options={[{ value: 'P0', label: 'P0' }, { value: 'P1', label: 'P1' }, { value: 'P2', label: 'P2' }, { value: 'P3', label: 'P3' }]} />
+              </Form.Item>
+            </div>
+            <Form.Item label="期望包含内容" name="expected_contains_input">
+              <Input placeholder="用逗号分隔，例如：证据,建议,下一步动作" />
+            </Form.Item>
+            <Form.Item name="required_evidence" valuePropName="checked">
+              <Switch checkedChildren="必须有证据" unCheckedChildren="不强制证据" />
+            </Form.Item>
+            <Button type="primary" icon={<AuditOutlined />} onClick={handleCreateTestCase}>创建评测用例</Button>
+          </Form>
+        </WorkbenchSection>
+
+        <WorkbenchSection title="意图纠错" description="当机器人选错 Skill 时，把用户说法和期望 Skill 固化为纠错规则。">
+          <Form<CorrectionFormValues> form={correctionForm} layout="vertical" disabled={!canEvaluate}>
+            <Form.Item label="用户说法" name="phrase" rules={[{ required: true, message: '请输入用户说法' }]}>
+              <Input placeholder="例如：空间类机会" />
+            </Form.Item>
+            <Form.Item label="适用机器人" name="profile_key">
+              <Select allowClear options={profileOptions} />
+            </Form.Item>
+            <Form.Item label="期望 Skill" name="expected_skills" rules={[{ required: true, message: '请选择期望 Skill' }]}>
+              <Select mode="multiple" options={skillOptions} />
+            </Form.Item>
+            <Form.Item label="备注" name="notes">
+              <Input.TextArea rows={3} placeholder="说明为什么应该这样路由" />
+            </Form.Item>
+            <Button type="primary" icon={<SaveOutlined />} onClick={handleCreateCorrection}>保存纠错</Button>
+          </Form>
+        </WorkbenchSection>
+
+        <WorkbenchSection title="评测用例列表" description="运行后会生成评测记录和失败原因。" className="bot-span-all">
+          <Table
+            className="edl-table"
+            rowKey="id"
+            dataSource={testCases}
+            pagination={false}
+            scroll={{ x: 1080 }}
+            columns={[
+              { title: '用例', dataIndex: 'name', render: (_: string, record: BotTestCase) => <div className="bot-table-title"><strong>{record.name}</strong><span>{record.input_text}</span></div> },
+              { title: '优先级', dataIndex: 'priority', width: 90, render: (value: string) => <Tag color={value === 'P0' ? 'error' : value === 'P1' ? 'warning' : 'default'}>{value}</Tag> },
+              { title: '期望 Skill', dataIndex: 'expected_skills', render: (value: string[]) => (value || []).map((item) => <Tag key={item}>{skills.find((skill) => skill.skill_key === item)?.name || item}</Tag>) },
+              { title: '上次结果', dataIndex: 'last_result', width: 110, render: (value: Record<string, any>) => <Tag color={value?.status === 'passed' ? 'success' : value?.status === 'failed' ? 'error' : 'default'}>{value?.status || '未运行'}</Tag> },
+              { title: '上次运行', dataIndex: 'last_run_at', width: 170, render: formatTime },
+              { title: '操作', width: 100, render: (_: unknown, record: BotTestCase) => <Button size="small" loading={caseRunningId === record.id} disabled={!canEvaluate} onClick={() => handleRunCase(record)}>运行</Button> },
+            ]}
+          />
+        </WorkbenchSection>
+
+        <WorkbenchSection title="最近评测与纠错" description="失败评测用于驱动知识补充、Skill 调整或意图纠错。" className="bot-span-all">
+          <Table
+            className="edl-table"
+            rowKey="run_id"
+            dataSource={evaluationRuns}
+            pagination={false}
+            scroll={{ x: 920 }}
+            columns={[
+              { title: '运行编号', dataIndex: 'run_id' },
+              { title: '机器人', dataIndex: 'profile_key', render: (value: string) => profiles.find((item) => item.profile_key === value)?.name || value },
+              { title: '状态', dataIndex: 'status', width: 100, render: (value: string) => <Tag color={value === 'passed' ? 'success' : 'error'}>{value}</Tag> },
+              { title: '得分', dataIndex: 'score', width: 90, render: (value: number) => `${Math.round((value || 0) * 100)}%` },
+              { title: '失败项', dataIndex: 'result_payload', render: (value: Record<string, any>) => (value?.failures || []).map((item: any) => <Tag color="error" key={item.type}>{item.type}</Tag>) },
+              { title: '时间', dataIndex: 'created_at', width: 170, render: formatTime },
+            ]}
+          />
+          <div className="bot-correction-list">
+            {intentCorrections.slice(0, 8).map((item) => (
+              <Tag key={item.id} color="blue">{item.phrase} → {(item.expected_skills || []).join('、')}</Tag>
+            ))}
+          </div>
+        </WorkbenchSection>
+      </div>
+    );
+  }
+
+  function renderCollaborationTab() {
+    return (
+      <div className="bot-governance-grid">
+        <WorkbenchSection title="多机器人协作" description="让多个机器人分别回答同一任务，再汇总证据和结论。">
+          {!canEvaluate && <Alert className="bot-permission-alert" type="warning" showIcon message="当前账号只能查看协作结果。" />}
+          <Form<CollaborationFormValues> form={collaborationForm} layout="vertical" disabled={!canEvaluate}>
+            <div className="bot-form-row">
+              <Form.Item label="协作标题" name="title">
+                <Input placeholder="例如：本周公安空间数据机会会商" />
+              </Form.Item>
+              <Form.Item label="主机器人" name="lead_profile_key" rules={[{ required: true, message: '请选择主机器人' }]}>
+                <Select options={profileOptions} />
+              </Form.Item>
+            </div>
+            <Form.Item label="参与机器人" name="participant_profiles">
+              <Select mode="multiple" options={profileOptions} placeholder="选择参与会商的机器人" />
+            </Form.Item>
+            <Form.Item label="协作任务" name="input_text" rules={[{ required: true, message: '请输入协作任务' }]}>
+              <Input.TextArea rows={5} placeholder="例如：结合本周标讯、政策、部门周报，判断下周应重点跟进哪些方向" />
+            </Form.Item>
+            <Button type="primary" icon={<BranchesOutlined />} loading={collaborationRunning} onClick={handleRunCollaboration}>运行协作</Button>
+          </Form>
+        </WorkbenchSection>
+
+        <WorkbenchSection title="协作结果" description="每次协作都会保留参与机器人、回答、证据和汇总结论。">
+          {collaborations[0] ? (
+            <div className="bot-preview-answer">
+              <strong>{collaborations[0].title}</strong>
+              <p>{String(collaborations[0].result_payload?.summary || '暂无汇总')}</p>
+              <span>{collaborations[0].participant_profiles.length} 个机器人 · {collaborations[0].evidence_records?.length || 0} 条证据</span>
+            </div>
+          ) : <Empty description="暂无协作结果" />}
+        </WorkbenchSection>
+
+        <WorkbenchSection title="协作记录" description="用于复盘机器人之间的分工、证据和结果。" className="bot-span-all">
+          <Table
+            className="edl-table"
+            rowKey="run_id"
+            dataSource={collaborations}
+            pagination={false}
+            scroll={{ x: 1080 }}
+            columns={[
+              { title: '任务', dataIndex: 'title', render: (_: string, record: BotCollaborationRun) => <div className="bot-table-title"><strong>{record.title}</strong><span>{record.input_text}</span></div> },
+              { title: '主机器人', dataIndex: 'lead_profile_key', width: 180, render: (value: string) => profiles.find((item) => item.profile_key === value)?.name || value },
+              { title: '参与', dataIndex: 'participant_profiles', render: (value: string[]) => (value || []).map((item) => <Tag key={item}>{profiles.find((profile) => profile.profile_key === item)?.name || item}</Tag>) },
+              { title: '状态', dataIndex: 'status', width: 110, render: (value: string) => <Tag color={value === 'completed' ? 'success' : 'processing'}>{value}</Tag> },
+              { title: '证据', dataIndex: 'evidence_records', width: 90, render: (value: BotEvidenceRecord[]) => value?.length || 0 },
+              { title: '时间', dataIndex: 'created_at', width: 170, render: formatTime },
+            ]}
+          />
+        </WorkbenchSection>
+      </div>
     );
   }
 
@@ -841,6 +1649,14 @@ const EvidenceList: React.FC<{ evidence: BotEvidenceRecord[] }> = ({ evidence })
 function formatTime(value?: string | null): string {
   if (!value) return '—';
   return dayjs(value).format('YYYY-MM-DD HH:mm');
+}
+
+function splitTextList(value?: string): string[] {
+  return String(value || '')
+    .split(/[,，;；\n]/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 20);
 }
 
 export default BotCenter;
