@@ -888,6 +888,10 @@ export interface BotOverview {
   active_tasks?: number;
   failed_evaluations?: number;
   collaboration_runs?: number;
+  open_inbox?: number;
+  open_handoffs?: number;
+  enabled_adapters?: number;
+  open_feedback?: number;
   latest_run_at?: string | null;
 }
 
@@ -1043,6 +1047,58 @@ export interface BotChannelBinding {
   updated_at?: string | null;
 }
 
+export interface BotChannelAdapter {
+  id: number;
+  adapter_key: string;
+  channel_type: string;
+  name: string;
+  status: string;
+  event_mode: string;
+  auth_scheme: string;
+  signing_required: boolean;
+  rate_limit_per_minute: number;
+  retry_policy?: Record<string, any>;
+  capabilities: string[];
+  config?: Record<string, any>;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotInboxItem {
+  id: number;
+  inbox_id: string;
+  conversation_id: string;
+  channel_key: string;
+  channel_name: string;
+  profile_key: string;
+  title: string;
+  sender_name?: string | null;
+  owner_name?: string | null;
+  status: string;
+  priority: string;
+  tags?: string[];
+  last_message_at?: string | null;
+  handoff_required?: boolean;
+  handoff_reason?: string | null;
+  resolution_summary?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotHandoff {
+  id: number;
+  handoff_id: string;
+  inbox_id: string;
+  conversation_id: string;
+  assignee_name: string;
+  status: string;
+  reason?: string | null;
+  requested_by_name?: string | null;
+  resolved_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
 export interface BotAuditLog {
   id: number;
   event_type: string;
@@ -1103,6 +1159,20 @@ export interface BotTask {
   updated_at?: string | null;
 }
 
+export interface BotTaskRun {
+  id: number;
+  run_id: string;
+  task_id: string;
+  profile_key: string;
+  status: string;
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  result_payload?: Record<string, any>;
+  error_message?: string | null;
+  created_by_name?: string | null;
+}
+
 export interface BotActionApproval {
   id: number;
   action_id: string;
@@ -1125,6 +1195,7 @@ export interface BotTestCase {
   name: string;
   profile_key: string;
   input_text: string;
+  conversation_turns?: Array<{ role?: string; content?: string }>;
   expected_skills: string[];
   expected_contains: string[];
   required_evidence: boolean;
@@ -1180,6 +1251,85 @@ export interface BotQualitySummary {
   failed_evaluation_runs: number;
   pending_actions: number;
   no_evidence_skill_runs: number;
+}
+
+export interface BotReleaseVersion {
+  id: number;
+  version_id: string;
+  profile_key: string;
+  version: number;
+  status: string;
+  environment_key: string;
+  payload?: Record<string, any>;
+  test_summary?: Record<string, any>;
+  created_by_name?: string | null;
+  published_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotFeedback {
+  id: number;
+  feedback_id: string;
+  conversation_id?: string | null;
+  message_id?: number | null;
+  profile_key?: string | null;
+  rating: 'helpful' | 'unhelpful' | 'unsafe' | 'wrong' | string;
+  reason?: string | null;
+  comment?: string | null;
+  status: string;
+  created_by_name?: string | null;
+  created_at?: string | null;
+  resolved_at?: string | null;
+}
+
+export interface BotKnowledgeSyncJob {
+  id: number;
+  job_id: string;
+  name: string;
+  source_type: string;
+  category: string;
+  status: string;
+  schedule_type: string;
+  source_config?: Record<string, any>;
+  last_run_at?: string | null;
+  result_payload?: Record<string, any>;
+  created_by_name?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotEnvironment {
+  id: number;
+  environment_key: string;
+  name: string;
+  status: string;
+  is_default: boolean;
+  config?: Record<string, any>;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotCompliancePolicy {
+  id: number;
+  policy_key: string;
+  name: string;
+  policy_type: string;
+  status: string;
+  action: string;
+  rules?: Record<string, any>;
+  created_by_name?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotObservabilitySummary {
+  range_days: number;
+  skill_runs: number;
+  failed_skill_runs: number;
+  avg_skill_duration_ms: number;
+  failed_inbound_events: number;
+  open_feedback: number;
 }
 
 export async function fetchBotOverview() {
@@ -1306,6 +1456,14 @@ export async function updateBotChannelBinding(channelKey: string, data: Partial<
   return request<BotChannelBinding>(`/api/bot/channel-bindings/${channelKey}`, { method: 'PUT', data });
 }
 
+export async function fetchBotChannelAdapters() {
+  return request<BotChannelAdapter[]>('/api/bot/channel-adapters', { method: 'GET' });
+}
+
+export async function saveBotChannelAdapter(data: Partial<BotChannelAdapter>) {
+  return request<BotChannelAdapter>('/api/bot/channel-adapters', { method: 'POST', data });
+}
+
 export async function runBotInboundTest(data: {
   channel_key?: string;
   content: string;
@@ -1317,6 +1475,22 @@ export async function runBotInboundTest(data: {
     data,
     timeout: LONG_TASK_TIMEOUT_MS,
   });
+}
+
+export async function fetchBotInbox(params?: { status?: string }) {
+  return request<{ total: number; items: BotInboxItem[] }>('/api/bot/inbox', { method: 'GET', params });
+}
+
+export async function updateBotInboxItem(inboxId: string, data: Partial<BotInboxItem>) {
+  return request<BotInboxItem>(`/api/bot/inbox/${inboxId}`, { method: 'PUT', data });
+}
+
+export async function createBotHandoff(inboxId: string, data: { assignee_name: string; reason?: string }) {
+  return request<BotHandoff>(`/api/bot/inbox/${inboxId}/handoff`, { method: 'POST', data });
+}
+
+export async function fetchBotHandoffs(params?: { status?: string }) {
+  return request<{ total: number; items: BotHandoff[] }>('/api/bot/handoffs', { method: 'GET', params });
 }
 
 export async function fetchBotSkillRuns(params?: {
@@ -1341,6 +1515,10 @@ export async function createBotTask(data: Partial<BotTask>) {
 
 export async function runBotTask(taskId: string) {
   return request<BotTask>(`/api/bot/tasks/${taskId}/run`, { method: 'POST', timeout: LONG_TASK_TIMEOUT_MS });
+}
+
+export async function fetchBotTaskRuns(params?: { task_id?: string }) {
+  return request<{ total: number; items: BotTaskRun[] }>('/api/bot/task-runs', { method: 'GET', params });
 }
 
 export async function fetchBotApprovals(params?: { status?: string; page?: number; page_size?: number }) {
@@ -1396,6 +1574,65 @@ export async function runBotCollaboration(data: Partial<BotCollaborationRun>) {
 
 export async function fetchBotQualitySummary() {
   return request<BotQualitySummary>('/api/bot/quality-summary', { method: 'GET' });
+}
+
+export async function fetchBotReleases(params?: { profile_key?: string }) {
+  return request<{ total: number; items: BotReleaseVersion[] }>('/api/bot/releases', { method: 'GET', params });
+}
+
+export async function createBotRelease(data: { profile_key: string; environment_key?: string; change_note?: string }) {
+  return request<BotReleaseVersion>('/api/bot/releases', { method: 'POST', data });
+}
+
+export async function publishBotRelease(versionId: string, force = false) {
+  return request<BotReleaseVersion>(`/api/bot/releases/${versionId}/publish`, {
+    method: 'POST',
+    params: { force },
+    timeout: LONG_TASK_TIMEOUT_MS,
+  });
+}
+
+export async function rollbackBotRelease(versionId: string) {
+  return request<BotReleaseVersion>(`/api/bot/releases/${versionId}/rollback`, { method: 'POST' });
+}
+
+export async function fetchBotFeedback(params?: { status?: string }) {
+  return request<{ total: number; items: BotFeedback[] }>('/api/bot/feedback', { method: 'GET', params });
+}
+
+export async function createBotFeedback(data: Partial<BotFeedback>) {
+  return request<BotFeedback>('/api/bot/feedback', { method: 'POST', data });
+}
+
+export async function fetchBotKnowledgeSyncJobs() {
+  return request<{ total: number; items: BotKnowledgeSyncJob[] }>('/api/bot/knowledge-sync', { method: 'GET' });
+}
+
+export async function createBotKnowledgeSyncJob(data: Partial<BotKnowledgeSyncJob>) {
+  return request<BotKnowledgeSyncJob>('/api/bot/knowledge-sync', { method: 'POST', data });
+}
+
+export async function runBotKnowledgeSyncJob(jobId: string) {
+  return request<BotKnowledgeSyncJob>(`/api/bot/knowledge-sync/${jobId}/run`, {
+    method: 'POST',
+    timeout: LONG_TASK_TIMEOUT_MS,
+  });
+}
+
+export async function fetchBotEnvironments() {
+  return request<BotEnvironment[]>('/api/bot/environments', { method: 'GET' });
+}
+
+export async function fetchBotCompliancePolicies() {
+  return request<BotCompliancePolicy[]>('/api/bot/compliance-policies', { method: 'GET' });
+}
+
+export async function saveBotCompliancePolicy(data: Partial<BotCompliancePolicy>) {
+  return request<BotCompliancePolicy>('/api/bot/compliance-policies', { method: 'POST', data });
+}
+
+export async function fetchBotObservabilitySummary() {
+  return request<BotObservabilitySummary>('/api/bot/observability-summary', { method: 'GET' });
 }
 
 export async function fetchBotBroadcasts(params?: {

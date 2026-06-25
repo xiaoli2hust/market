@@ -223,6 +223,10 @@ def check_mutating_routes_use_business_permissions() -> None:
         ],
         "backend/app/routers/bot.py": [
             'require_permission("bot:view")',
+            'require_permission("bot:configure")',
+            'require_permission("bot:knowledge")',
+            'require_permission("bot:approve")',
+            'require_permission("bot:evaluate")',
             'require_permission("bot:broadcast")',
         ],
         "backend/app/permissions.py": [
@@ -235,6 +239,77 @@ def check_mutating_routes_use_business_permissions() -> None:
         assert "get_current_user" not in text, f"{path} 不能只用登录态保护业务操作"
         for marker in markers:
             assert marker in text, f"{path} 缺少权限契约：{marker}"
+
+
+def check_bot_enterprise_ops_contract() -> None:
+    model = _read("backend/app/models.py")
+    router = _read("backend/app/routers/bot.py")
+    runtime = _read("backend/app/services/bot_runtime.py")
+    frontend_api = _read("frontend/src/services/api.ts")
+    frontend_page = _read("frontend/src/pages/BotCenter/index.tsx")
+    migration = _read("backend/migrations/versions/015_bot_enterprise_operations.py")
+    main = _read("backend/app/main.py")
+
+    for class_name in (
+        "BotChannelAdapter",
+        "BotInboundEvent",
+        "BotInboxItem",
+        "BotHandoff",
+        "BotTaskRun",
+        "BotReleaseVersion",
+        "BotFeedback",
+        "BotKnowledgeSyncJob",
+        "BotEnvironment",
+        "BotCompliancePolicy",
+    ):
+        assert f"class {class_name}" in model, f"机器人运营模型缺少 {class_name}"
+        assert class_name in runtime, f"机器人运行时缺少 {class_name}"
+
+    for table_name in (
+        "bot_channel_adapters",
+        "bot_inbound_events",
+        "bot_inbox_items",
+        "bot_handoffs",
+        "bot_task_runs",
+        "bot_release_versions",
+        "bot_feedback",
+        "bot_knowledge_sync_jobs",
+        "bot_environments",
+        "bot_compliance_policies",
+    ):
+        assert table_name in migration, f"机器人运营迁移缺少 {table_name}"
+        assert table_name in main, f"SQLite 自动迁移缺少 {table_name}"
+
+    for route in (
+        '"/channel-adapters"',
+        '"/inbox"',
+        '"/handoffs"',
+        '"/task-runs"',
+        '"/releases"',
+        '"/feedback"',
+        '"/knowledge-sync"',
+        '"/environments"',
+        '"/compliance-policies"',
+        '"/observability-summary"',
+    ):
+        assert route in router, f"机器人中心缺少路由 {route}"
+
+    for marker in (
+        "fetchBotChannelAdapters",
+        "fetchBotInbox",
+        "createBotHandoff",
+        "fetchBotReleases",
+        "publishBotRelease",
+        "fetchBotFeedback",
+        "fetchBotKnowledgeSyncJobs",
+        "fetchBotCompliancePolicies",
+        "fetchBotObservabilitySummary",
+    ):
+        assert marker in frontend_api, f"前端 API 缺少 {marker}"
+        assert marker in frontend_page, f"机器人中心页面未使用 {marker}"
+
+    for label in ("生产运营", "发布观测", "合规环境", "知识同步任务", "多轮上下文"):
+        assert label in frontend_page, f"机器人中心页面缺少 {label}"
 
 
 def check_runtime_config_clear_contract() -> None:
@@ -314,6 +389,9 @@ required = {
     "bot_knowledge_chunks", "bot_channel_bindings", "bot_test_cases",
     "bot_audit_logs", "bot_tasks", "bot_action_approvals",
     "bot_evaluation_runs", "bot_intent_corrections", "bot_collaboration_runs",
+    "bot_channel_adapters", "bot_inbound_events", "bot_inbox_items",
+    "bot_handoffs", "bot_task_runs", "bot_release_versions", "bot_feedback",
+    "bot_knowledge_sync_jobs", "bot_environments", "bot_compliance_policies",
 }
 missing = sorted(required - tables)
 conn.close()
@@ -829,6 +907,7 @@ def main() -> int:
         ("产品文档命名同步", check_docs_current_product_names),
         ("业务路由访问控制", check_business_routes_require_auth),
         ("写操作业务权限", check_mutating_routes_use_business_permissions),
+        ("机器人生产运营契约", check_bot_enterprise_ops_contract),
         ("运行时配置清空闭环", check_runtime_config_clear_contract),
         ("运行时 URL 校验", check_runtime_url_validation_contract),
         ("市场洞察筛选契约", check_intelligence_filter_contract),

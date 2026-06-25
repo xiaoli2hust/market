@@ -871,6 +871,122 @@ class BotChannelBinding(Base):
     )
 
 
+class BotChannelAdapter(Base):
+    """渠道适配器：管理钉钉/飞书/企微/Slack/Teams 等接入能力和安全策略。"""
+
+    __tablename__ = "bot_channel_adapters"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    adapter_key: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    channel_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="enabled", default="enabled", index=True)
+    event_mode: Mapped[str] = mapped_column(String(40), nullable=False, server_default="webhook", default="webhook")
+    auth_scheme: Mapped[str] = mapped_column(String(40), nullable=False, server_default="signed_webhook", default="signed_webhook")
+    signing_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true", default=True)
+    rate_limit_per_minute: Mapped[int] = mapped_column(Integer, nullable=False, server_default="60", default=60)
+    retry_policy: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    capabilities: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    last_error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    last_checked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_bot_channel_adapters_type_status", "channel_type", "status"),
+    )
+
+
+class BotInboundEvent(Base):
+    """入站消息事件：用于签名校验、去重、限流、失败重试和审计追踪。"""
+
+    __tablename__ = "bot_inbound_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_id: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    dedup_key: Mapped[str] = mapped_column(String(160), nullable=False, unique=True)
+    channel_key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    channel_type: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    sender_id: Mapped[Optional[str]] = mapped_column(String(120), nullable=True, index=True)
+    sender_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    retry_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    raw_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    result_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    processed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    __table_args__ = (
+        Index("ix_bot_inbound_events_channel_received", "channel_key", "received_at"),
+        Index("ix_bot_inbound_events_status_received", "status", "received_at"),
+    )
+
+
+class BotInboxItem(Base):
+    """群聊机器人收件箱：把真实群消息沉淀为可处理、可接管、可复盘的工作项。"""
+
+    __tablename__ = "bot_inbox_items"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    inbox_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    conversation_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    channel_key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    channel_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    profile_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    sender_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    owner_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="open", default="open", index=True)
+    priority: Mapped[str] = mapped_column(String(20), nullable=False, server_default="P2", default="P2", index=True)
+    tags: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    last_message_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    handoff_required: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", default=False)
+    handoff_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    resolution_summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_bot_inbox_items_status_priority", "status", "priority"),
+        Index("ix_bot_inbox_items_channel_status", "channel_key", "status"),
+    )
+
+
+class BotHandoff(Base):
+    """人工接管：机器人无法独立完成时转交负责人处理。"""
+
+    __tablename__ = "bot_handoffs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    handoff_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    inbox_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    conversation_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    assignee_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="open", default="open", index=True)
+    reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    requested_by_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class BotTestCase(Base):
     """机器人测试用例：把高频问题固化成验收资产。"""
 
@@ -880,6 +996,7 @@ class BotTestCase(Base):
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     profile_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
     input_text: Mapped[str] = mapped_column(Text, nullable=False)
+    conversation_turns: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     expected_skills: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     expected_contains: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
     required_evidence: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true", default=True)
@@ -942,6 +1059,31 @@ class BotTask(Base):
     __table_args__ = (
         Index("ix_bot_tasks_profile_status", "profile_key", "status"),
         Index("ix_bot_tasks_type_status", "task_type", "status"),
+    )
+
+
+class BotTaskRun(Base):
+    """机器人任务运行记录：每次调度/手动运行都有结果、耗时和错误。"""
+
+    __tablename__ = "bot_task_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    task_id: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    profile_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    trigger_type: Mapped[str] = mapped_column(String(30), nullable=False, server_default="manual", default="manual")
+    status: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    result_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    __table_args__ = (
+        Index("ix_bot_task_runs_task_started", "task_id", "started_at"),
+        Index("ix_bot_task_runs_status_started", "status", "started_at"),
     )
 
 
@@ -1039,6 +1181,119 @@ class BotCollaborationRun(Base):
     )
 
 
+class BotReleaseVersion(Base):
+    """机器人发布版本：Profile/Skill/Prompt/知识策略从草稿到发布可追溯。"""
+
+    __tablename__ = "bot_release_versions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    version_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    profile_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="draft", default="draft", index=True)
+    environment_key: Mapped[str] = mapped_column(String(40), nullable=False, server_default="prod", default="prod", index=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    test_summary: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_by_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_bot_release_versions_profile_version", "profile_key", "version"),
+        Index("ix_bot_release_versions_env_status", "environment_key", "status"),
+    )
+
+
+class BotFeedback(Base):
+    """用户反馈：把好/坏答案转成可处理的质量闭环。"""
+
+    __tablename__ = "bot_feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    feedback_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    conversation_id: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    message_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, index=True)
+    profile_key: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    rating: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    reason: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    comment: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="open", default="open", index=True)
+    created_by_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    resolved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BotKnowledgeSyncJob(Base):
+    """知识同步任务：统一管理周报、文档库、网页资料等知识来源。"""
+
+    __tablename__ = "bot_knowledge_sync_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    job_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(160), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    category: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="enabled", default="enabled", index=True)
+    schedule_type: Mapped[str] = mapped_column(String(30), nullable=False, server_default="manual", default="manual")
+    source_config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    last_run_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    result_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_by_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class BotEnvironment(Base):
+    """机器人运行环境：区分测试、预发布和生产，支持版本治理。"""
+
+    __tablename__ = "bot_environments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    environment_key: Mapped[str] = mapped_column(String(40), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="enabled", default="enabled", index=True)
+    is_default: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false", default=False)
+    config: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class BotCompliancePolicy(Base):
+    """机器人合规策略：敏感词、PII、动作确认和数据保留规则。"""
+
+    __tablename__ = "bot_compliance_policies"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    policy_key: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    policy_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(30), nullable=False, server_default="enabled", default="enabled", index=True)
+    action: Mapped[str] = mapped_column(String(40), nullable=False, server_default="warn", default="warn")
+    rules: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    created_by_name: Mapped[Optional[str]] = mapped_column(String(120), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class APIKeyRecord(Base):
     """API Key 管理。"""
 
@@ -1115,13 +1370,23 @@ __all__ = [
     "BotKnowledgeFile",
     "BotKnowledgeChunk",
     "BotChannelBinding",
+    "BotChannelAdapter",
+    "BotInboundEvent",
+    "BotInboxItem",
+    "BotHandoff",
     "BotTestCase",
     "BotAuditLog",
     "BotTask",
+    "BotTaskRun",
     "BotActionApproval",
     "BotEvaluationRun",
     "BotIntentCorrection",
     "BotCollaborationRun",
+    "BotReleaseVersion",
+    "BotFeedback",
+    "BotKnowledgeSyncJob",
+    "BotEnvironment",
+    "BotCompliancePolicy",
     "APIKeyRecord",
     "DingtalkConfig",
 ]

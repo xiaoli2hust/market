@@ -37,20 +37,40 @@ from ..models import (
     OperationLog,
 )
 from ..services.bot_runtime import (
+    bot_observability_summary,
     create_action_approval,
     create_bot_task,
+    create_feedback,
+    create_handoff,
     create_intent_correction,
+    create_knowledge_sync_job,
+    create_release_version,
     create_test_case,
     decide_action_approval,
     ensure_bot_runtime_defaults,
     extract_text_from_html,
     handle_inbound_message,
+    list_channel_adapters,
+    list_compliance_policies,
+    list_environments,
+    list_feedback,
+    list_handoffs,
+    list_inbox_items,
+    list_knowledge_sync_jobs,
+    list_release_versions,
+    list_task_runs,
     list_bot_runtime_overview,
+    publish_release_version,
+    rollback_release_version,
     run_agent_chat,
     run_bot_task_now,
     run_collaboration,
+    run_knowledge_sync_job,
     run_test_case,
+    update_inbox_item,
     update_knowledge_metadata,
+    upsert_channel_adapter,
+    upsert_compliance_policy,
     upsert_bot_profile,
     upload_knowledge_text,
 )
@@ -423,6 +443,30 @@ async def inbound_test(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@router.get("/channel-adapters")
+async def channel_adapters(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> list[dict[str, Any]]:
+    """外部群聊渠道适配器。"""
+
+    return await list_channel_adapters(db)
+
+
+@router.post("/channel-adapters")
+async def save_channel_adapter(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:configure")),
+) -> dict[str, Any]:
+    """新增或更新渠道适配器、认证和限流策略。"""
+
+    try:
+        return await upsert_channel_adapter(db, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @router.get("/channel-bindings")
 async def list_channel_bindings(
     db: AsyncSession = Depends(get_db),
@@ -494,6 +538,58 @@ async def update_channel_binding(
     await db.flush()
     await db.refresh(row)
     return _channel_binding_to_dict(row)
+
+
+@router.get("/inbox")
+async def bot_inbox(
+    status: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    """机器人生产收件箱：所有入站消息和需要人工处理的事项。"""
+
+    return await list_inbox_items(db, status=status)
+
+
+@router.put("/inbox/{inbox_id}")
+async def save_inbox_item(
+    inbox_id: str,
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:approve")),
+) -> dict[str, Any]:
+    """更新收件箱状态、负责人、优先级或处理结论。"""
+
+    try:
+        return await update_inbox_item(db, inbox_id=inbox_id, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if "不存在" in str(exc) else 400, detail=str(exc)) from exc
+
+
+@router.post("/inbox/{inbox_id}/handoff")
+async def handoff_inbox_item(
+    inbox_id: str,
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:approve")),
+) -> dict[str, Any]:
+    """把机器人无法直接闭环的事项转给人工负责人。"""
+
+    try:
+        return await create_handoff(db, inbox_id=inbox_id, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if "不存在" in str(exc) else 400, detail=str(exc)) from exc
+
+
+@router.get("/handoffs")
+async def bot_handoffs(
+    status: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    """人工接管记录。"""
+
+    return await list_handoffs(db, status=status)
 
 
 @router.get("/skill-runs")
@@ -583,6 +679,17 @@ async def run_task(
         return await run_bot_task_now(db, task_id=task_id, user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=404 if "不存在" in str(exc) else 400, detail=str(exc)) from exc
+
+
+@router.get("/task-runs")
+async def bot_task_runs(
+    task_id: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    """自动任务运行历史。"""
+
+    return await list_task_runs(db, task_id=task_id)
 
 
 @router.get("/approvals")
@@ -753,6 +860,167 @@ async def create_collaboration(
         return await run_collaboration(db, payload=payload, user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/releases")
+async def bot_releases(
+    profile_key: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    """机器人发布版本。"""
+
+    return await list_release_versions(db, profile_key=profile_key)
+
+
+@router.post("/releases")
+async def create_release(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:configure")),
+) -> dict[str, Any]:
+    """把当前机器人配置快照保存为待发布版本。"""
+
+    try:
+        return await create_release_version(db, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/releases/{version_id}/publish")
+async def publish_release(
+    version_id: str,
+    force: bool = Query(default=False),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:evaluate")),
+) -> dict[str, Any]:
+    """发布版本；默认会先跑评测门禁。"""
+
+    try:
+        return await publish_release_version(db, version_id=version_id, user=_user, force=force)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/releases/{version_id}/rollback")
+async def rollback_release(
+    version_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:configure")),
+) -> dict[str, Any]:
+    """把版本标记为已回滚，保留发布审计。"""
+
+    try:
+        return await rollback_release_version(db, version_id=version_id, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if "不存在" in str(exc) else 400, detail=str(exc)) from exc
+
+
+@router.get("/feedback")
+async def bot_feedback(
+    status: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    """用户反馈与质量问题队列。"""
+
+    return await list_feedback(db, status=status)
+
+
+@router.post("/feedback")
+async def save_feedback(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:evaluate")),
+) -> dict[str, Any]:
+    """记录一次机器人回答反馈。"""
+
+    try:
+        return await create_feedback(db, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/knowledge-sync")
+async def knowledge_sync_jobs(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    """知识同步任务。"""
+
+    return await list_knowledge_sync_jobs(db)
+
+
+@router.post("/knowledge-sync")
+async def create_knowledge_sync(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:knowledge")),
+) -> dict[str, Any]:
+    """创建知识同步任务。"""
+
+    try:
+        return await create_knowledge_sync_job(db, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/knowledge-sync/{job_id}/run")
+async def run_knowledge_sync(
+    job_id: str,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:knowledge")),
+) -> dict[str, Any]:
+    """立即运行知识同步任务。"""
+
+    try:
+        return await run_knowledge_sync_job(db, job_id=job_id, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=404 if "不存在" in str(exc) else 400, detail=str(exc)) from exc
+
+
+@router.get("/environments")
+async def bot_environments(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> list[dict[str, Any]]:
+    """机器人运行环境。"""
+
+    return await list_environments(db)
+
+
+@router.get("/compliance-policies")
+async def compliance_policies(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> list[dict[str, Any]]:
+    """机器人内容安全与留存策略。"""
+
+    return await list_compliance_policies(db)
+
+
+@router.post("/compliance-policies")
+async def save_compliance_policy(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:configure")),
+) -> dict[str, Any]:
+    """新增或更新机器人合规策略。"""
+
+    try:
+        return await upsert_compliance_policy(db, payload=payload, user=_user)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/observability-summary")
+async def observability_summary(
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("bot:view")),
+) -> dict[str, Any]:
+    """机器人近 7 天运行健康度。"""
+
+    return await bot_observability_summary(db)
 
 
 @router.get("/quality-summary")

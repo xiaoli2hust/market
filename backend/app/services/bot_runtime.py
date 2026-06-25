@@ -8,6 +8,7 @@ skill-run records and evidence snippets.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import re
 import time
 import uuid
@@ -25,18 +26,28 @@ from ..models import (
     Activity,
     BotAuditLog,
     BotActionApproval,
+    BotChannelAdapter,
     BotChannelBinding,
     BotCollaborationRun,
     BotConversation,
+    BotCompliancePolicy,
+    BotEnvironment,
     BotEvaluationRun,
+    BotFeedback,
+    BotHandoff,
+    BotInboundEvent,
+    BotInboxItem,
     BotIntentCorrection,
     BotKnowledgeChunk,
     BotKnowledgeFile,
+    BotKnowledgeSyncJob,
     BotMessage,
     BotProfile,
+    BotReleaseVersion,
     BotSkill,
     BotSkillRun,
     BotTask,
+    BotTaskRun,
     BotToolCall,
     BotTestCase,
     CrawlerItem,
@@ -183,6 +194,87 @@ BOT_SKILLS: list[dict[str, Any]] = [
     },
 ]
 
+BOT_CHANNEL_ADAPTERS: list[dict[str, Any]] = [
+    {
+        "adapter_key": "dingtalk_enterprise",
+        "channel_type": "dingtalk",
+        "name": "钉钉企业机器人",
+        "event_mode": "webhook",
+        "auth_scheme": "signed_webhook",
+        "signing_required": True,
+        "rate_limit_per_minute": 60,
+        "retry_policy": {"max_attempts": 3, "backoff_seconds": [5, 30, 120]},
+        "capabilities": ["inbound_message", "markdown_reply", "broadcast", "at_user", "at_all"],
+    },
+    {
+        "adapter_key": "feishu_enterprise",
+        "channel_type": "feishu",
+        "name": "飞书群机器人",
+        "event_mode": "webhook",
+        "auth_scheme": "signed_webhook",
+        "signing_required": True,
+        "rate_limit_per_minute": 60,
+        "retry_policy": {"max_attempts": 3, "backoff_seconds": [5, 30, 120]},
+        "capabilities": ["inbound_message", "card_reply", "broadcast", "mention_user"],
+    },
+    {
+        "adapter_key": "wechat_work_enterprise",
+        "channel_type": "wechat_work",
+        "name": "企业微信群机器人",
+        "event_mode": "webhook",
+        "auth_scheme": "signed_webhook",
+        "signing_required": True,
+        "rate_limit_per_minute": 60,
+        "retry_policy": {"max_attempts": 3, "backoff_seconds": [5, 30, 120]},
+        "capabilities": ["inbound_message", "markdown_reply", "broadcast"],
+    },
+    {
+        "adapter_key": "slack_enterprise",
+        "channel_type": "slack",
+        "name": "Slack Bot",
+        "event_mode": "events_api",
+        "auth_scheme": "oauth_scopes",
+        "signing_required": True,
+        "rate_limit_per_minute": 50,
+        "retry_policy": {"max_attempts": 3, "backoff_seconds": [3, 30, 300]},
+        "capabilities": ["inbound_message", "thread_reply", "broadcast", "audit_log"],
+    },
+    {
+        "adapter_key": "teams_enterprise",
+        "channel_type": "teams",
+        "name": "Microsoft Teams Bot",
+        "event_mode": "bot_framework",
+        "auth_scheme": "tenant_oauth",
+        "signing_required": True,
+        "rate_limit_per_minute": 40,
+        "retry_policy": {"max_attempts": 3, "backoff_seconds": [5, 30, 300]},
+        "capabilities": ["inbound_message", "proactive_message", "handoff", "rate_limit_status"],
+    },
+]
+
+BOT_ENVIRONMENTS: list[dict[str, Any]] = [
+    {"environment_key": "test", "name": "测试环境", "is_default": False, "config": {"requires_release_gate": False}},
+    {"environment_key": "staging", "name": "预发布环境", "is_default": False, "config": {"requires_release_gate": True}},
+    {"environment_key": "prod", "name": "生产环境", "is_default": True, "config": {"requires_release_gate": True}},
+]
+
+BOT_COMPLIANCE_POLICIES: list[dict[str, Any]] = [
+    {
+        "policy_key": "default_sensitive_terms",
+        "name": "敏感词与外发动作保护",
+        "policy_type": "content_guard",
+        "action": "warn",
+        "rules": {"blocked_terms": ["密码", "密钥", "token", "身份证", "银行卡"], "require_approval_actions": ["broadcast", "external_api"]},
+    },
+    {
+        "policy_key": "default_retention",
+        "name": "对话与证据保留周期",
+        "policy_type": "retention",
+        "action": "audit",
+        "rules": {"conversation_days": 365, "audit_days": 1095, "feedback_days": 730},
+    },
+]
+
 _DEFAULTS_LOCK = asyncio.Lock()
 
 
@@ -269,6 +361,45 @@ async def _ensure_bot_runtime_defaults_locked(db: AsyncSession) -> None:
                 status="active",
             )
         )
+
+    for item in BOT_CHANNEL_ADAPTERS:
+        row = (
+            await db.execute(select(BotChannelAdapter).where(BotChannelAdapter.adapter_key == item["adapter_key"]))
+        ).scalar_one_or_none()
+        if row:
+            row.name = item["name"]
+            row.channel_type = item["channel_type"]
+            row.event_mode = item["event_mode"]
+            row.auth_scheme = item["auth_scheme"]
+            row.signing_required = bool(item["signing_required"])
+            row.rate_limit_per_minute = int(item["rate_limit_per_minute"])
+            row.retry_policy = item["retry_policy"]
+            row.capabilities = item["capabilities"]
+            continue
+        db.add(BotChannelAdapter(status="enabled", config={}, **item))
+
+    for item in BOT_ENVIRONMENTS:
+        row = (
+            await db.execute(select(BotEnvironment).where(BotEnvironment.environment_key == item["environment_key"]))
+        ).scalar_one_or_none()
+        if row:
+            row.name = item["name"]
+            row.is_default = bool(item["is_default"])
+            row.config = item["config"]
+            continue
+        db.add(BotEnvironment(status="enabled", **item))
+
+    for item in BOT_COMPLIANCE_POLICIES:
+        row = (
+            await db.execute(select(BotCompliancePolicy).where(BotCompliancePolicy.policy_key == item["policy_key"]))
+        ).scalar_one_or_none()
+        if row:
+            row.name = item["name"]
+            row.policy_type = item["policy_type"]
+            row.action = item["action"]
+            row.rules = item["rules"]
+            continue
+        db.add(BotCompliancePolicy(status="enabled", **item))
     await db.flush()
 
 
@@ -293,6 +424,12 @@ async def list_bot_runtime_overview(db: AsyncSession) -> dict[str, Any]:
         await db.execute(select(func.count(BotEvaluationRun.id)).where(BotEvaluationRun.status == "failed"))
     ).scalar_one() or 0
     collaboration_runs = (await db.execute(select(func.count(BotCollaborationRun.id)))).scalar_one() or 0
+    open_inbox = (await db.execute(select(func.count(BotInboxItem.id)).where(BotInboxItem.status == "open"))).scalar_one() or 0
+    open_handoffs = (await db.execute(select(func.count(BotHandoff.id)).where(BotHandoff.status == "open"))).scalar_one() or 0
+    enabled_adapters = (
+        await db.execute(select(func.count(BotChannelAdapter.id)).where(BotChannelAdapter.status == "enabled"))
+    ).scalar_one() or 0
+    open_feedback = (await db.execute(select(func.count(BotFeedback.id)).where(BotFeedback.status == "open"))).scalar_one() or 0
     return {
         "profiles": int(profile_count),
         "enabled_skills": int(skill_count),
@@ -302,6 +439,10 @@ async def list_bot_runtime_overview(db: AsyncSession) -> dict[str, Any]:
         "active_tasks": int(active_tasks),
         "failed_evaluations": int(failed_evaluations),
         "collaboration_runs": int(collaboration_runs),
+        "open_inbox": int(open_inbox),
+        "open_handoffs": int(open_handoffs),
+        "enabled_adapters": int(enabled_adapters),
+        "open_feedback": int(open_feedback),
         "latest_run_at": latest_run.isoformat() if latest_run else None,
     }
 
@@ -578,6 +719,7 @@ async def handle_inbound_message(
     clean = content.strip()
     if not clean:
         raise ValueError("入站消息不能为空")
+    now = datetime.now(timezone.utc)
     binding = (
         await db.execute(
             select(BotChannelBinding).where(
@@ -588,7 +730,70 @@ async def handle_inbound_message(
     ).scalar_one_or_none()
     if not binding:
         raise ValueError("未找到可用群聊绑定")
-    binding.last_seen_at = datetime.now(timezone.utc)
+
+    adapter = await _adapter_for_channel(db, binding.channel_type)
+    dedup_key, event_id = _inbound_event_keys(binding, sender_id, clean, raw_payload or {}, now)
+    existing = (
+        await db.execute(select(BotInboundEvent).where(BotInboundEvent.dedup_key == dedup_key))
+    ).scalar_one_or_none()
+    if existing and existing.status == "processed" and existing.result_payload:
+        return existing.result_payload
+
+    rate_limit = adapter.rate_limit_per_minute if adapter else 60
+    minute_ago = now - timedelta(minutes=1)
+    recent_count = (
+        await db.execute(
+            select(func.count(BotInboundEvent.id)).where(
+                BotInboundEvent.channel_key == binding.channel_key,
+                BotInboundEvent.received_at >= minute_ago,
+            )
+        )
+    ).scalar_one() or 0
+    if recent_count >= rate_limit:
+        event = existing or BotInboundEvent(
+            event_id=event_id,
+            dedup_key=dedup_key,
+            channel_key=binding.channel_key,
+            channel_type=binding.channel_type,
+            sender_id=sender_id,
+            sender_name=sender_name,
+            content=clean,
+            status="rate_limited",
+            raw_payload=raw_payload or {},
+            received_at=now,
+        )
+        event.status = "rate_limited"
+        event.error_message = "当前群聊消息过于密集，已按渠道限流策略暂停处理"
+        if not existing:
+            db.add(event)
+        await db.flush()
+        raise ValueError(event.error_message)
+
+    compliance = await _check_compliance(db, clean)
+    blocked = any(item.get("action") == "block" for item in compliance)
+    event = existing or BotInboundEvent(
+        event_id=event_id,
+        dedup_key=dedup_key,
+        channel_key=binding.channel_key,
+        channel_type=binding.channel_type,
+        sender_id=sender_id,
+        sender_name=sender_name,
+        content=clean,
+        status="processing",
+        raw_payload={**(raw_payload or {}), "compliance": compliance},
+        received_at=now,
+    )
+    if not existing:
+        db.add(event)
+        await db.flush()
+    if blocked:
+        event.status = "blocked"
+        event.error_message = "消息命中合规阻断策略，未交给机器人处理"
+        event.processed_at = datetime.now(timezone.utc)
+        await db.flush()
+        raise ValueError(event.error_message)
+
+    binding.last_seen_at = now
     external_thread_key = f"{binding.channel_type}:{binding.channel_key}:{sender_id or 'anonymous'}"
     conversation = await _find_channel_conversation(db, binding.bot_profile_key, external_thread_key)
     result = await run_agent_chat(
@@ -606,8 +811,21 @@ async def handle_inbound_message(
             "external_thread_key": external_thread_key,
             "sender_id": sender_id,
             "raw_payload": raw_payload or {},
+            "compliance": compliance,
+            "inbound_event_id": event.event_id,
         },
     )
+    await _upsert_inbox_item(
+        db,
+        binding=binding,
+        result=result,
+        sender_name=sender_name,
+        content=clean,
+        compliance=compliance,
+    )
+    event.status = "processed"
+    event.result_payload = result
+    event.processed_at = datetime.now(timezone.utc)
     _audit(
         db,
         event_type="inbound_message_handled",
@@ -618,6 +836,117 @@ async def handle_inbound_message(
     )
     await db.flush()
     return result
+
+
+async def list_channel_adapters(db: AsyncSession) -> list[dict[str, Any]]:
+    await ensure_bot_runtime_defaults(db)
+    rows = (await db.execute(select(BotChannelAdapter).order_by(BotChannelAdapter.channel_type.asc()))).scalars().all()
+    return [_channel_adapter_dict(row) for row in rows]
+
+
+async def upsert_channel_adapter(db: AsyncSession, *, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    await ensure_bot_runtime_defaults(db)
+    adapter_key = str(payload.get("adapter_key") or "").strip()[:80]
+    if not adapter_key:
+        adapter_key = f"adapter_{uuid.uuid4().hex[:8]}"
+    channel_type = str(payload.get("channel_type") or "").strip()[:40]
+    name = str(payload.get("name") or "").strip()[:120]
+    if not channel_type or not name:
+        raise ValueError("渠道类型和适配器名称不能为空")
+    row = (
+        await db.execute(select(BotChannelAdapter).where(BotChannelAdapter.adapter_key == adapter_key))
+    ).scalar_one_or_none()
+    if not row:
+        row = BotChannelAdapter(adapter_key=adapter_key, channel_type=channel_type, name=name)
+        db.add(row)
+    row.channel_type = channel_type
+    row.name = name
+    row.status = str(payload.get("status") or "enabled")[:20]
+    row.event_mode = str(payload.get("event_mode") or "webhook")[:40]
+    row.auth_scheme = str(payload.get("auth_scheme") or "signed_webhook")[:40]
+    row.signing_required = bool(payload.get("signing_required", True))
+    row.rate_limit_per_minute = max(1, min(int(payload.get("rate_limit_per_minute") or 60), 600))
+    row.retry_policy = payload.get("retry_policy") if isinstance(payload.get("retry_policy"), dict) else {"max_attempts": 3}
+    row.capabilities = [str(item).strip()[:60] for item in (payload.get("capabilities") or []) if str(item).strip()][:30]
+    row.config = payload.get("config") if isinstance(payload.get("config"), dict) else {}
+    row.updated_at = datetime.now(timezone.utc)
+    _audit(db, event_type="channel_adapter_saved", user=user, payload={"adapter_key": row.adapter_key, "channel_type": row.channel_type})
+    await db.flush()
+    await db.refresh(row)
+    return _channel_adapter_dict(row)
+
+
+async def list_inbox_items(db: AsyncSession, *, status: str | None = None) -> dict[str, Any]:
+    conditions = []
+    if status:
+        conditions.append(BotInboxItem.status == status)
+    total = (await db.execute(select(func.count(BotInboxItem.id)).where(*conditions))).scalar_one() or 0
+    rows = (
+        await db.execute(select(BotInboxItem).where(*conditions).order_by(BotInboxItem.updated_at.desc()).limit(50))
+    ).scalars().all()
+    return {"total": int(total), "items": [_inbox_item_dict(row) for row in rows]}
+
+
+async def update_inbox_item(db: AsyncSession, *, inbox_id: str, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    row = (
+        await db.execute(select(BotInboxItem).where(BotInboxItem.inbox_id == inbox_id))
+    ).scalar_one_or_none()
+    if not row:
+        raise ValueError("收件箱事项不存在")
+    if "status" in payload and payload["status"] in {"open", "processing", "handoff", "resolved", "ignored"}:
+        row.status = payload["status"]
+    if "priority" in payload and payload["priority"] in {"P0", "P1", "P2", "P3"}:
+        row.priority = payload["priority"]
+    if "owner_name" in payload:
+        row.owner_name = str(payload.get("owner_name") or "").strip()[:120] or None
+    if "resolution_summary" in payload:
+        row.resolution_summary = str(payload.get("resolution_summary") or "").strip()[:2000] or None
+    row.updated_at = datetime.now(timezone.utc)
+    _audit(db, event_type="inbox_item_updated", user=user, profile_key=row.profile_key, conversation_id=row.conversation_id, payload={"inbox_id": inbox_id, "status": row.status})
+    await db.flush()
+    await db.refresh(row)
+    return _inbox_item_dict(row)
+
+
+async def create_handoff(db: AsyncSession, *, inbox_id: str, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    inbox = (
+        await db.execute(select(BotInboxItem).where(BotInboxItem.inbox_id == inbox_id))
+    ).scalar_one_or_none()
+    if not inbox:
+        raise ValueError("收件箱事项不存在")
+    assignee = str(payload.get("assignee_name") or "").strip()[:120]
+    if not assignee:
+        raise ValueError("接管负责人不能为空")
+    row = BotHandoff(
+        handoff_id=f"HO-{uuid.uuid4().hex[:12]}",
+        inbox_id=inbox.inbox_id,
+        conversation_id=inbox.conversation_id,
+        assignee_name=assignee,
+        reason=str(payload.get("reason") or "").strip()[:2000] or None,
+        requested_by_name=_user_name(user),
+        status="open",
+    )
+    db.add(row)
+    inbox.status = "handoff"
+    inbox.owner_name = assignee
+    inbox.handoff_required = True
+    inbox.handoff_reason = row.reason
+    inbox.updated_at = datetime.now(timezone.utc)
+    _audit(db, event_type="handoff_created", user=user, profile_key=inbox.profile_key, conversation_id=inbox.conversation_id, payload={"handoff_id": row.handoff_id, "assignee": assignee})
+    await db.flush()
+    await db.refresh(row)
+    return _handoff_dict(row)
+
+
+async def list_handoffs(db: AsyncSession, *, status: str | None = None) -> dict[str, Any]:
+    conditions = []
+    if status:
+        conditions.append(BotHandoff.status == status)
+    total = (await db.execute(select(func.count(BotHandoff.id)).where(*conditions))).scalar_one() or 0
+    rows = (
+        await db.execute(select(BotHandoff).where(*conditions).order_by(BotHandoff.created_at.desc()).limit(50))
+    ).scalars().all()
+    return {"total": int(total), "items": [_handoff_dict(row) for row in rows]}
 
 
 async def create_bot_task(db: AsyncSession, *, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
@@ -653,28 +982,66 @@ async def run_bot_task_now(db: AsyncSession, *, task_id: str, user: dict[str, An
         raise ValueError("任务不存在")
     prompt = _task_prompt(task)
     started = datetime.now(timezone.utc)
-    result = await run_agent_chat(
-        db,
+    run = BotTaskRun(
+        run_id=f"BTR-{uuid.uuid4().hex[:12]}",
+        task_id=task.task_id,
         profile_key=task.profile_key,
-        message=prompt,
-        user=user,
-        simulated_user_role="任务调度器",
-        channel_type="task",
-        message_source="bot_task",
-        conversation_meta={"task_id": task.task_id, "task_type": task.task_type},
+        trigger_type="manual",
+        status="running",
+        started_at=started,
     )
-    task.last_run_at = started
-    task.result_payload = {
-        "conversation": result["conversation"],
-        "answer": result["assistant_message"]["content"],
-        "skills": [item["skill_key"] for item in result.get("selected_skills", [])],
-        "evidence_count": len(result.get("evidence_records") or []),
-    }
-    task.updated_at = datetime.now(timezone.utc)
-    _audit(db, event_type="task_run", user=user, profile_key=task.profile_key, conversation_id=result["conversation"]["conversation_id"], payload={"task_id": task.task_id})
+    db.add(run)
     await db.flush()
-    await db.refresh(task)
-    return _task_dict(task)
+    try:
+        result = await run_agent_chat(
+            db,
+            profile_key=task.profile_key,
+            message=prompt,
+            user=user,
+            simulated_user_role="任务调度器",
+            channel_type="task",
+            message_source="bot_task",
+            conversation_meta={"task_id": task.task_id, "task_type": task.task_type, "task_run_id": run.run_id},
+        )
+        finished = datetime.now(timezone.utc)
+        run.status = "completed"
+        run.finished_at = finished
+        run.duration_ms = int((finished - started).total_seconds() * 1000)
+        run.result_payload = {
+            "conversation": result["conversation"],
+            "answer": result["assistant_message"]["content"],
+            "skills": [item["skill_key"] for item in result.get("selected_skills", [])],
+            "evidence_count": len(result.get("evidence_records") or []),
+        }
+        task.last_run_at = started
+        task.result_payload = {**run.result_payload, "task_run_id": run.run_id}
+        task.updated_at = finished
+        _audit(db, event_type="task_run", user=user, profile_key=task.profile_key, conversation_id=result["conversation"]["conversation_id"], payload={"task_id": task.task_id, "run_id": run.run_id})
+        await db.flush()
+        await db.refresh(task)
+        return _task_dict(task)
+    except Exception as exc:
+        finished = datetime.now(timezone.utc)
+        run.status = "failed"
+        run.finished_at = finished
+        run.duration_ms = int((finished - started).total_seconds() * 1000)
+        run.error_message = str(exc)[:1000]
+        task.last_run_at = started
+        task.result_payload = {"task_run_id": run.run_id, "status": "failed", "error_message": run.error_message}
+        task.updated_at = finished
+        await db.flush()
+        raise
+
+
+async def list_task_runs(db: AsyncSession, *, task_id: str | None = None) -> dict[str, Any]:
+    conditions = []
+    if task_id:
+        conditions.append(BotTaskRun.task_id == task_id)
+    total = (await db.execute(select(func.count(BotTaskRun.id)).where(*conditions))).scalar_one() or 0
+    rows = (
+        await db.execute(select(BotTaskRun).where(*conditions).order_by(BotTaskRun.started_at.desc()).limit(50))
+    ).scalars().all()
+    return {"total": int(total), "items": [_task_run_dict(row) for row in rows]}
 
 
 async def create_action_approval(db: AsyncSession, *, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
@@ -739,6 +1106,7 @@ async def create_test_case(db: AsyncSession, *, payload: dict[str, Any], user: d
         name=name,
         profile_key=str(payload.get("profile_key") or "management_assistant_agent")[:80],
         input_text=input_text,
+        conversation_turns=payload.get("conversation_turns") if isinstance(payload.get("conversation_turns"), list) else [],
         expected_skills=[str(item) for item in (payload.get("expected_skills") or [])],
         expected_contains=[str(item) for item in (payload.get("expected_contains") or [])],
         required_evidence=bool(payload.get("required_evidence", True)),
@@ -759,16 +1127,37 @@ async def run_test_case(db: AsyncSession, *, case_id: int, user: dict[str, Any])
     ).scalar_one_or_none()
     if not case:
         raise ValueError("测试用例不存在")
-    result = await run_agent_chat(
-        db,
-        profile_key=case.profile_key,
-        message=case.input_text,
-        user=user,
-        simulated_user_role="评测用户",
-        channel_type="evaluation",
-        message_source="bot_evaluation",
-        conversation_meta={"test_case_id": case.id},
-    )
+    turns = case.conversation_turns or []
+    result = None
+    conversation_id = None
+    if turns:
+        for index, turn in enumerate(turns[:8]):
+            text = str(turn.get("input") if isinstance(turn, dict) else turn).strip()
+            if not text:
+                continue
+            result = await run_agent_chat(
+                db,
+                profile_key=case.profile_key,
+                message=text,
+                conversation_id=conversation_id,
+                user=user,
+                simulated_user_role="评测用户",
+                channel_type="evaluation",
+                message_source="bot_evaluation",
+                conversation_meta={"test_case_id": case.id, "turn_index": index},
+            )
+            conversation_id = result["conversation"]["conversation_id"]
+    if result is None:
+        result = await run_agent_chat(
+            db,
+            profile_key=case.profile_key,
+            message=case.input_text,
+            user=user,
+            simulated_user_role="评测用户",
+            channel_type="evaluation",
+            message_source="bot_evaluation",
+            conversation_meta={"test_case_id": case.id},
+        )
     selected = [item["skill_key"] for item in result.get("selected_skills", [])]
     answer = result["assistant_message"]["content"]
     missing_skills = [skill for skill in (case.expected_skills or []) if skill not in selected]
@@ -879,6 +1268,261 @@ async def run_collaboration(db: AsyncSession, *, payload: dict[str, Any], user: 
     await db.flush()
     await db.refresh(run)
     return _collaboration_dict(run)
+
+
+async def list_release_versions(db: AsyncSession, *, profile_key: str | None = None) -> dict[str, Any]:
+    await ensure_bot_runtime_defaults(db)
+    conditions = []
+    if profile_key:
+        conditions.append(BotReleaseVersion.profile_key == profile_key)
+    total = (await db.execute(select(func.count(BotReleaseVersion.id)).where(*conditions))).scalar_one() or 0
+    rows = (
+        await db.execute(select(BotReleaseVersion).where(*conditions).order_by(BotReleaseVersion.created_at.desc()).limit(50))
+    ).scalars().all()
+    return {"total": int(total), "items": [_release_version_dict(row) for row in rows]}
+
+
+async def create_release_version(db: AsyncSession, *, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    await ensure_bot_runtime_defaults(db)
+    profile_key = str(payload.get("profile_key") or "management_assistant_agent").strip()
+    profile = (
+        await db.execute(select(BotProfile).where(BotProfile.profile_key == profile_key))
+    ).scalar_one_or_none()
+    if not profile:
+        raise ValueError("机器人 Profile 不存在")
+    latest_version = (
+        await db.execute(select(func.max(BotReleaseVersion.version)).where(BotReleaseVersion.profile_key == profile_key))
+    ).scalar_one() or 0
+    skills = (
+        await db.execute(select(BotSkill).where(BotSkill.skill_key.in_(profile.allowed_skills or [])))
+    ).scalars().all()
+    release = BotReleaseVersion(
+        version_id=f"BRV-{uuid.uuid4().hex[:12]}",
+        profile_key=profile_key,
+        version=int(latest_version) + 1,
+        status="draft",
+        environment_key=str(payload.get("environment_key") or "prod")[:40],
+        payload={
+            "profile": _profile_dict(profile),
+            "skills": [_skill_dict(skill) for skill in skills],
+            "change_note": str(payload.get("change_note") or "").strip()[:2000],
+        },
+        created_by_name=_user_name(user),
+    )
+    db.add(release)
+    _audit(db, event_type="release_created", user=user, profile_key=profile_key, payload={"version_id": release.version_id})
+    await db.flush()
+    await db.refresh(release)
+    return _release_version_dict(release)
+
+
+async def publish_release_version(db: AsyncSession, *, version_id: str, user: dict[str, Any], force: bool = False) -> dict[str, Any]:
+    release = (
+        await db.execute(select(BotReleaseVersion).where(BotReleaseVersion.version_id == version_id))
+    ).scalar_one_or_none()
+    if not release:
+        raise ValueError("发布版本不存在")
+    cases = (
+        await db.execute(select(BotTestCase).where(BotTestCase.profile_key == release.profile_key, BotTestCase.status == "active"))
+    ).scalars().all()
+    runs = []
+    failed = 0
+    for case in cases[:20]:
+        result = await run_test_case(db, case_id=case.id, user=user)
+        runs.append(result["run"])
+        if result["run"]["status"] != "passed":
+            failed += 1
+    release.test_summary = {"total": len(runs), "failed": failed, "forced": force}
+    if failed and not force:
+        release.status = "blocked"
+        await db.flush()
+        await db.refresh(release)
+        raise ValueError("发布门禁未通过：存在失败评测")
+    now = datetime.now(timezone.utc)
+    previous = (
+        await db.execute(
+            select(BotReleaseVersion).where(
+                BotReleaseVersion.profile_key == release.profile_key,
+                BotReleaseVersion.environment_key == release.environment_key,
+                BotReleaseVersion.status == "released",
+            )
+        )
+    ).scalars().all()
+    for item in previous:
+        item.status = "superseded"
+        item.updated_at = now
+    release.status = "released"
+    release.published_at = now
+    release.updated_at = now
+    _audit(db, event_type="release_published", user=user, profile_key=release.profile_key, payload={"version_id": release.version_id, "failed": failed})
+    await db.flush()
+    await db.refresh(release)
+    return _release_version_dict(release)
+
+
+async def rollback_release_version(db: AsyncSession, *, version_id: str, user: dict[str, Any]) -> dict[str, Any]:
+    release = (
+        await db.execute(select(BotReleaseVersion).where(BotReleaseVersion.version_id == version_id))
+    ).scalar_one_or_none()
+    if not release:
+        raise ValueError("发布版本不存在")
+    release.status = "rolled_back"
+    release.updated_at = datetime.now(timezone.utc)
+    _audit(db, event_type="release_rolled_back", user=user, profile_key=release.profile_key, payload={"version_id": version_id})
+    await db.flush()
+    await db.refresh(release)
+    return _release_version_dict(release)
+
+
+async def create_feedback(db: AsyncSession, *, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    rating = str(payload.get("rating") or "").strip()
+    if rating not in {"helpful", "unhelpful", "unsafe", "wrong"}:
+        raise ValueError("反馈类型不支持")
+    row = BotFeedback(
+        feedback_id=f"FB-{uuid.uuid4().hex[:12]}",
+        conversation_id=str(payload.get("conversation_id") or "").strip()[:80] or None,
+        message_id=int(payload["message_id"]) if str(payload.get("message_id") or "").isdigit() else None,
+        profile_key=str(payload.get("profile_key") or "").strip()[:80] or None,
+        rating=rating,
+        reason=str(payload.get("reason") or "").strip()[:120] or None,
+        comment=str(payload.get("comment") or "").strip()[:2000] or None,
+        status="open",
+        created_by_name=_user_name(user),
+    )
+    db.add(row)
+    _audit(db, event_type="feedback_created", user=user, profile_key=row.profile_key, conversation_id=row.conversation_id, payload={"feedback_id": row.feedback_id, "rating": rating})
+    await db.flush()
+    await db.refresh(row)
+    return _feedback_dict(row)
+
+
+async def list_feedback(db: AsyncSession, *, status: str | None = None) -> dict[str, Any]:
+    conditions = []
+    if status:
+        conditions.append(BotFeedback.status == status)
+    total = (await db.execute(select(func.count(BotFeedback.id)).where(*conditions))).scalar_one() or 0
+    rows = (
+        await db.execute(select(BotFeedback).where(*conditions).order_by(BotFeedback.created_at.desc()).limit(50))
+    ).scalars().all()
+    return {"total": int(total), "items": [_feedback_dict(row) for row in rows]}
+
+
+async def list_knowledge_sync_jobs(db: AsyncSession) -> dict[str, Any]:
+    rows = (await db.execute(select(BotKnowledgeSyncJob).order_by(BotKnowledgeSyncJob.created_at.desc()).limit(50))).scalars().all()
+    return {"total": len(rows), "items": [_knowledge_sync_job_dict(row) for row in rows]}
+
+
+async def create_knowledge_sync_job(db: AsyncSession, *, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    name = str(payload.get("name") or "").strip()[:160]
+    source_type = str(payload.get("source_type") or "manual_text").strip()[:50]
+    if not name:
+        raise ValueError("同步任务名称不能为空")
+    row = BotKnowledgeSyncJob(
+        job_id=f"KS-{uuid.uuid4().hex[:12]}",
+        name=name,
+        source_type=source_type,
+        category=str(payload.get("category") or "general")[:50],
+        schedule_type=str(payload.get("schedule_type") or "manual")[:30],
+        source_config=payload.get("source_config") if isinstance(payload.get("source_config"), dict) else {},
+        status=str(payload.get("status") or "enabled")[:30],
+        created_by_name=_user_name(user),
+    )
+    db.add(row)
+    _audit(db, event_type="knowledge_sync_created", user=user, payload={"job_id": row.job_id, "source_type": source_type})
+    await db.flush()
+    await db.refresh(row)
+    return _knowledge_sync_job_dict(row)
+
+
+async def run_knowledge_sync_job(db: AsyncSession, *, job_id: str, user: dict[str, Any]) -> dict[str, Any]:
+    row = (
+        await db.execute(select(BotKnowledgeSyncJob).where(BotKnowledgeSyncJob.job_id == job_id))
+    ).scalar_one_or_none()
+    if not row:
+        raise ValueError("知识同步任务不存在")
+    config = row.source_config or {}
+    now = datetime.now(timezone.utc)
+    if row.source_type == "manual_text":
+        text = str(config.get("text_content") or "").strip()
+        if len(text) < 10:
+            raise ValueError("手动文本同步任务缺少可入库内容")
+        saved = await upload_knowledge_text(
+            db,
+            title=str(config.get("title") or row.name),
+            text_content=text,
+            category=row.category,
+            user=user,
+            source_type="sync_manual_text",
+            tags=["sync", row.source_type],
+        )
+        row.result_payload = {"status": "completed", "file_id": saved["file_id"], "message": "知识已同步入库"}
+    else:
+        row.result_payload = {"status": "needs_adapter", "message": "该来源已建档，需接入对应连接器后自动同步"}
+    row.last_run_at = now
+    row.updated_at = now
+    _audit(db, event_type="knowledge_sync_run", user=user, payload={"job_id": row.job_id, "status": row.result_payload.get("status")})
+    await db.flush()
+    await db.refresh(row)
+    return _knowledge_sync_job_dict(row)
+
+
+async def list_environments(db: AsyncSession) -> list[dict[str, Any]]:
+    await ensure_bot_runtime_defaults(db)
+    rows = (await db.execute(select(BotEnvironment).order_by(BotEnvironment.id.asc()))).scalars().all()
+    return [_environment_dict(row) for row in rows]
+
+
+async def list_compliance_policies(db: AsyncSession) -> list[dict[str, Any]]:
+    await ensure_bot_runtime_defaults(db)
+    rows = (await db.execute(select(BotCompliancePolicy).order_by(BotCompliancePolicy.id.asc()))).scalars().all()
+    return [_compliance_policy_dict(row) for row in rows]
+
+
+async def upsert_compliance_policy(db: AsyncSession, *, payload: dict[str, Any], user: dict[str, Any]) -> dict[str, Any]:
+    policy_key = str(payload.get("policy_key") or "").strip()[:80] or f"policy_{uuid.uuid4().hex[:8]}"
+    name = str(payload.get("name") or "").strip()[:120]
+    if not name:
+        raise ValueError("策略名称不能为空")
+    row = (
+        await db.execute(select(BotCompliancePolicy).where(BotCompliancePolicy.policy_key == policy_key))
+    ).scalar_one_or_none()
+    if not row:
+        row = BotCompliancePolicy(policy_key=policy_key, name=name, policy_type=str(payload.get("policy_type") or "content_guard")[:50])
+        db.add(row)
+    row.name = name
+    row.policy_type = str(payload.get("policy_type") or row.policy_type)[:50]
+    row.status = str(payload.get("status") or "enabled")[:30]
+    row.action = str(payload.get("action") or "warn")[:40]
+    row.rules = payload.get("rules") if isinstance(payload.get("rules"), dict) else {}
+    row.created_by_name = row.created_by_name or _user_name(user)
+    row.updated_at = datetime.now(timezone.utc)
+    _audit(db, event_type="compliance_policy_saved", user=user, payload={"policy_key": row.policy_key, "action": row.action})
+    await db.flush()
+    await db.refresh(row)
+    return _compliance_policy_dict(row)
+
+
+async def bot_observability_summary(db: AsyncSession) -> dict[str, Any]:
+    since = datetime.now(timezone.utc) - timedelta(days=7)
+    total_runs = (await db.execute(select(func.count(BotSkillRun.id)).where(BotSkillRun.created_at >= since))).scalar_one() or 0
+    failed_runs = (
+        await db.execute(select(func.count(BotSkillRun.id)).where(BotSkillRun.created_at >= since, BotSkillRun.status != "success"))
+    ).scalar_one() or 0
+    avg_duration = (
+        await db.execute(select(func.avg(BotSkillRun.duration_ms)).where(BotSkillRun.created_at >= since))
+    ).scalar_one() or 0
+    inbound_failed = (
+        await db.execute(select(func.count(BotInboundEvent.id)).where(BotInboundEvent.received_at >= since, BotInboundEvent.status.in_(["failed", "blocked", "rate_limited"])))
+    ).scalar_one() or 0
+    feedback_open = (await db.execute(select(func.count(BotFeedback.id)).where(BotFeedback.status == "open"))).scalar_one() or 0
+    return {
+        "range_days": 7,
+        "skill_runs": int(total_runs),
+        "failed_skill_runs": int(failed_runs),
+        "avg_skill_duration_ms": round(float(avg_duration or 0), 2),
+        "failed_inbound_events": int(inbound_failed),
+        "open_feedback": int(feedback_open),
+    }
 
 
 def extract_text_from_html(html: str) -> str:
@@ -1589,6 +2233,26 @@ def _profile_dict(row: BotProfile) -> dict[str, Any]:
     }
 
 
+def _skill_dict(row: BotSkill) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "skill_key": row.skill_key,
+        "name": row.name,
+        "category": row.category,
+        "description": row.description,
+        "trigger_scenarios": row.trigger_scenarios or [],
+        "input_contract": row.input_contract or {},
+        "output_contract": row.output_contract or {},
+        "evidence_rules": row.evidence_rules or {},
+        "required_permission": row.required_permission,
+        "enabled": row.enabled,
+        "implementation_status": row.implementation_status,
+        "config": row.config or {},
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
 def _task_prompt(task: BotTask) -> str:
     payload = task.input_payload or {}
     custom_prompt = str(payload.get("prompt") or "").strip()
@@ -1623,6 +2287,22 @@ def _task_dict(row: BotTask) -> dict[str, Any]:
     }
 
 
+def _task_run_dict(row: BotTaskRun) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "run_id": row.run_id,
+        "task_id": row.task_id,
+        "profile_key": row.profile_key,
+        "trigger_type": row.trigger_type,
+        "status": row.status,
+        "result_payload": row.result_payload or {},
+        "error_message": row.error_message,
+        "started_at": row.started_at.isoformat() if row.started_at else None,
+        "finished_at": row.finished_at.isoformat() if row.finished_at else None,
+        "duration_ms": row.duration_ms,
+    }
+
+
 def _approval_dict(row: BotActionApproval) -> dict[str, Any]:
     return {
         "id": row.id,
@@ -1648,6 +2328,7 @@ def _test_case_dict(row: BotTestCase) -> dict[str, Any]:
         "name": row.name,
         "profile_key": row.profile_key,
         "input_text": row.input_text,
+        "conversation_turns": row.conversation_turns or [],
         "expected_skills": row.expected_skills or [],
         "expected_contains": row.expected_contains or [],
         "required_evidence": row.required_evidence,
@@ -1703,6 +2384,246 @@ def _collaboration_dict(row: BotCollaborationRun) -> dict[str, Any]:
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
+
+
+def _channel_adapter_dict(row: BotChannelAdapter) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "adapter_key": row.adapter_key,
+        "channel_type": row.channel_type,
+        "name": row.name,
+        "status": row.status,
+        "event_mode": row.event_mode,
+        "auth_scheme": row.auth_scheme,
+        "signing_required": row.signing_required,
+        "rate_limit_per_minute": row.rate_limit_per_minute,
+        "retry_policy": row.retry_policy or {},
+        "capabilities": row.capabilities or [],
+        "config": row.config or {},
+        "last_error_message": row.last_error_message,
+        "last_checked_at": row.last_checked_at.isoformat() if row.last_checked_at else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _inbound_event_dict(row: BotInboundEvent) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "event_id": row.event_id,
+        "channel_key": row.channel_key,
+        "channel_type": row.channel_type,
+        "sender_name": row.sender_name,
+        "content": row.content,
+        "status": row.status,
+        "retry_count": row.retry_count,
+        "error_message": row.error_message,
+        "received_at": row.received_at.isoformat() if row.received_at else None,
+        "processed_at": row.processed_at.isoformat() if row.processed_at else None,
+    }
+
+
+def _inbox_item_dict(row: BotInboxItem) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "inbox_id": row.inbox_id,
+        "conversation_id": row.conversation_id,
+        "channel_key": row.channel_key,
+        "channel_name": row.channel_name,
+        "profile_key": row.profile_key,
+        "title": row.title,
+        "sender_name": row.sender_name,
+        "owner_name": row.owner_name,
+        "status": row.status,
+        "priority": row.priority,
+        "tags": row.tags or [],
+        "last_message_at": row.last_message_at.isoformat() if row.last_message_at else None,
+        "handoff_required": row.handoff_required,
+        "handoff_reason": row.handoff_reason,
+        "resolution_summary": row.resolution_summary,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _handoff_dict(row: BotHandoff) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "handoff_id": row.handoff_id,
+        "inbox_id": row.inbox_id,
+        "conversation_id": row.conversation_id,
+        "assignee_name": row.assignee_name,
+        "status": row.status,
+        "reason": row.reason,
+        "requested_by_name": row.requested_by_name,
+        "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _release_version_dict(row: BotReleaseVersion) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "version_id": row.version_id,
+        "profile_key": row.profile_key,
+        "version": row.version,
+        "status": row.status,
+        "environment_key": row.environment_key,
+        "payload": row.payload or {},
+        "test_summary": row.test_summary or {},
+        "created_by_name": row.created_by_name,
+        "published_at": row.published_at.isoformat() if row.published_at else None,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _feedback_dict(row: BotFeedback) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "feedback_id": row.feedback_id,
+        "conversation_id": row.conversation_id,
+        "message_id": row.message_id,
+        "profile_key": row.profile_key,
+        "rating": row.rating,
+        "reason": row.reason,
+        "comment": row.comment,
+        "status": row.status,
+        "created_by_name": row.created_by_name,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "resolved_at": row.resolved_at.isoformat() if row.resolved_at else None,
+    }
+
+
+def _knowledge_sync_job_dict(row: BotKnowledgeSyncJob) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "job_id": row.job_id,
+        "name": row.name,
+        "source_type": row.source_type,
+        "category": row.category,
+        "status": row.status,
+        "schedule_type": row.schedule_type,
+        "source_config": row.source_config or {},
+        "last_run_at": row.last_run_at.isoformat() if row.last_run_at else None,
+        "result_payload": row.result_payload or {},
+        "created_by_name": row.created_by_name,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _environment_dict(row: BotEnvironment) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "environment_key": row.environment_key,
+        "name": row.name,
+        "status": row.status,
+        "is_default": row.is_default,
+        "config": row.config or {},
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _compliance_policy_dict(row: BotCompliancePolicy) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "policy_key": row.policy_key,
+        "name": row.name,
+        "policy_type": row.policy_type,
+        "status": row.status,
+        "action": row.action,
+        "rules": row.rules or {},
+        "created_by_name": row.created_by_name,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+async def _adapter_for_channel(db: AsyncSession, channel_type: str) -> BotChannelAdapter | None:
+    return (
+        await db.execute(
+            select(BotChannelAdapter)
+            .where(BotChannelAdapter.channel_type == channel_type, BotChannelAdapter.status == "enabled")
+            .order_by(BotChannelAdapter.id.asc())
+        )
+    ).scalars().first()
+
+
+def _inbound_event_keys(
+    binding: BotChannelBinding,
+    sender_id: str | None,
+    content: str,
+    raw_payload: dict[str, Any],
+    now: datetime,
+) -> tuple[str, str]:
+    external_id = str(raw_payload.get("event_id") or raw_payload.get("message_id") or raw_payload.get("msg_id") or "").strip()
+    if external_id:
+        event_id = external_id[:100]
+        return f"{binding.channel_key}:{event_id}"[:160], event_id
+    minute_bucket = now.strftime("%Y%m%d%H%M")
+    digest = hashlib.sha256(f"{binding.channel_key}|{sender_id}|{content}|{minute_bucket}".encode("utf-8")).hexdigest()[:24]
+    event_id = f"EV-{digest}"
+    return f"{binding.channel_key}:{event_id}"[:160], event_id
+
+
+async def _check_compliance(db: AsyncSession, content: str) -> list[dict[str, Any]]:
+    rows = (
+        await db.execute(select(BotCompliancePolicy).where(BotCompliancePolicy.status == "enabled"))
+    ).scalars().all()
+    issues: list[dict[str, Any]] = []
+    for row in rows:
+        rules = row.rules or {}
+        for term in rules.get("blocked_terms", []) or []:
+            clean_term = str(term).strip()
+            if clean_term and clean_term in content:
+                issues.append({"policy_key": row.policy_key, "name": row.name, "term": clean_term, "action": row.action})
+    return issues
+
+
+async def _upsert_inbox_item(
+    db: AsyncSession,
+    *,
+    binding: BotChannelBinding,
+    result: dict[str, Any],
+    sender_name: str | None,
+    content: str,
+    compliance: list[dict[str, Any]],
+) -> BotInboxItem:
+    conversation = result.get("conversation") or {}
+    conversation_id = str(conversation.get("conversation_id") or "")
+    row = (
+        await db.execute(select(BotInboxItem).where(BotInboxItem.conversation_id == conversation_id))
+    ).scalar_one_or_none()
+    title = content[:80] or conversation.get("title") or "群聊消息"
+    priority = "P1" if compliance else "P2"
+    tags = [item.get("policy_key") for item in compliance if item.get("policy_key")]
+    now = datetime.now(timezone.utc)
+    if not row:
+        row = BotInboxItem(
+            inbox_id=f"BI-{uuid.uuid4().hex[:12]}",
+            conversation_id=conversation_id,
+            channel_key=binding.channel_key,
+            channel_name=binding.channel_name,
+            profile_key=binding.bot_profile_key,
+            title=title,
+            sender_name=sender_name,
+            status="open",
+            priority=priority,
+            tags=tags,
+            last_message_at=now,
+        )
+        db.add(row)
+    else:
+        row.title = title
+        row.sender_name = sender_name or row.sender_name
+        row.priority = "P1" if priority == "P1" else row.priority
+        row.tags = sorted(set((row.tags or []) + tags))
+        row.last_message_at = now
+        row.updated_at = now
+    return row
 
 
 def _audit(
