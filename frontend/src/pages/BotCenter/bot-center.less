@@ -1,17 +1,182 @@
 .bot-center {
+  .ant-tabs-nav {
+    margin: 18px 0 0;
+  }
+
+  .bot-chat-grid,
+  .bot-knowledge-grid,
+  .bot-broadcast-tab,
+  .bot-logs-grid {
+    display: grid;
+    gap: 16px;
+    margin-top: 16px;
+  }
+
+  .bot-chat-grid {
+    grid-template-columns: minmax(0, 1fr) 360px;
+    align-items: start;
+  }
+
+  .bot-agent-side {
+    display: grid;
+    gap: 16px;
+    min-width: 0;
+  }
+
+  .bot-chat-toolbar {
+    display: grid;
+    grid-template-columns: minmax(190px, 260px) minmax(160px, 1fr) auto;
+    gap: 10px;
+    margin-bottom: 12px;
+  }
+
+  .bot-chat-window {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 360px;
+    max-height: 520px;
+    overflow: auto;
+    padding: 16px;
+    background: var(--paper);
+    border: 1px solid var(--paper-deep);
+    border-radius: 8px;
+  }
+
+  .bot-chat-message {
+    max-width: 86%;
+    min-width: 0;
+    padding: 12px 14px;
+    border: 1px solid var(--paper-deep);
+    border-radius: 8px;
+    background: #fff;
+
+    span {
+      display: block;
+      margin-bottom: 6px;
+      color: var(--ink-faint);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    p {
+      margin: 0;
+      color: var(--ink);
+      font-size: 14px;
+      line-height: 1.75;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    &.role-user {
+      align-self: flex-end;
+      background: rgba(180, 35, 24, 0.06);
+      border-color: rgba(180, 35, 24, 0.18);
+    }
+
+    &.role-assistant {
+      align-self: flex-start;
+      border-left: 3px solid var(--vermilion);
+    }
+  }
+
+  .bot-chat-input {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 120px;
+    gap: 10px;
+    margin-top: 12px;
+    align-items: end;
+  }
+
+  .bot-skill-trace,
+  .bot-evidence-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .bot-trace-item,
+  .bot-evidence {
+    min-width: 0;
+    padding: 12px;
+    background: var(--paper);
+    border: 1px solid var(--paper-deep);
+    border-radius: 8px;
+  }
+
+  .bot-trace-item {
+    div {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    strong {
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    span {
+      display: block;
+      margin-top: 6px;
+      color: var(--ink-faint);
+      font-size: 12px;
+    }
+  }
+
+  .bot-evidence {
+    div {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+      min-width: 0;
+    }
+
+    strong {
+      overflow: hidden;
+      color: var(--ink);
+      font-size: 13px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    p {
+      display: -webkit-box;
+      overflow: hidden;
+      margin: 8px 0 6px;
+      color: var(--ink-soft);
+      font-size: 12px;
+      line-height: 1.55;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 3;
+    }
+
+    > span {
+      color: var(--ink-faint);
+      font-size: 11px;
+    }
+  }
+
+  .bot-knowledge-grid {
+    grid-template-columns: minmax(0, 1.15fr) minmax(300px, 0.85fr);
+  }
+
+  .bot-span-all {
+    grid-column: 1 / -1;
+  }
+
+  .bot-broadcast-tab,
+  .bot-logs-grid {
+    grid-template-columns: 1fr;
+  }
+
   .bot-permission-alert {
     margin-bottom: 14px;
-  }
-
-  .bot-broadcast-grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
-    gap: 18px;
-    align-items: stretch;
-  }
-
-  .bot-broadcast-form {
-    min-width: 0;
   }
 
   .bot-form-row {
@@ -30,45 +195,6 @@
     .ant-space {
       justify-content: flex-end;
     }
-  }
-
-  .bot-policy-panel {
-    min-width: 0;
-    padding: 18px;
-    background:
-      linear-gradient(180deg, rgba(180, 35, 24, 0.06), rgba(255, 255, 255, 0)),
-      var(--paper);
-    border: 1px solid var(--paper-deep);
-    border-radius: 8px;
-
-    h3 {
-      margin: 10px 0 12px;
-      color: var(--ink);
-      font-family: var(--serif);
-      font-size: 20px;
-      font-weight: 900;
-    }
-
-    ul {
-      display: grid;
-      gap: 10px;
-      margin: 0;
-      padding-left: 18px;
-      color: var(--ink-soft);
-      font-size: 13px;
-      line-height: 1.62;
-    }
-  }
-
-  .bot-policy-icon {
-    display: grid;
-    width: 44px;
-    height: 44px;
-    place-items: center;
-    color: #fff;
-    background: var(--ink);
-    border-radius: 8px;
-    font-size: 20px;
   }
 
   .bot-record-table {
@@ -101,15 +227,6 @@
     }
   }
 
-  .bot-time-cell {
-    display: grid;
-    gap: 4px;
-    color: var(--ink-faint);
-    font-size: 12px;
-    line-height: 1.45;
-    white-space: nowrap;
-  }
-
   .bot-result {
     display: inline-block;
     max-width: 240px;
@@ -129,69 +246,27 @@
     color: var(--ink-faint);
     font-size: 12px;
   }
-
-  .bot-task-grid {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 12px;
-  }
-
-  .bot-task-card {
-    display: grid;
-    grid-template-columns: 42px minmax(0, 1fr);
-    gap: 12px;
-    min-width: 0;
-    padding: 14px;
-    background: var(--paper);
-    border: 1px solid var(--paper-deep);
-    border-radius: 8px;
-
-    > i {
-      display: grid;
-      width: 42px;
-      height: 42px;
-      place-items: center;
-      color: var(--vermilion);
-      background: rgba(180, 35, 24, 0.08);
-      border-radius: 8px;
-      font-size: 19px;
-      font-style: normal;
-    }
-
-    h3 {
-      margin: 0 0 6px;
-      color: var(--ink);
-      font-size: 15px;
-      font-weight: 900;
-    }
-
-    p {
-      min-height: 42px;
-      margin: 0 0 12px;
-      color: var(--ink-faint);
-      font-size: 12px;
-      line-height: 1.55;
-    }
-  }
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1120px) {
   .bot-center {
-    .bot-broadcast-grid,
-    .bot-task-grid {
+    .bot-chat-grid,
+    .bot-knowledge-grid {
       grid-template-columns: 1fr;
-    }
-
-    .bot-policy-panel {
-      order: -1;
     }
   }
 }
 
 @media (max-width: 720px) {
   .bot-center {
+    .bot-chat-toolbar,
+    .bot-chat-input,
     .bot-form-row {
       grid-template-columns: 1fr;
+    }
+
+    .bot-chat-message {
+      max-width: 100%;
     }
 
     .bot-form-actions {

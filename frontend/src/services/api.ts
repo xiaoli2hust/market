@@ -871,6 +871,171 @@ export async function updateOpportunityLeadStatus(id: number, status: Opportunit
 export type BotBroadcastStatus = 'draft' | 'sending' | 'sent' | 'failed';
 export type BotMessageType = 'markdown' | 'text';
 
+export interface BotOverview {
+  profiles: number;
+  enabled_skills: number;
+  conversations: number;
+  knowledge_files: number;
+  latest_run_at?: string | null;
+}
+
+export interface BotProfile {
+  id: number;
+  profile_key: string;
+  name: string;
+  description?: string | null;
+  system_prompt?: string | null;
+  default_role?: string | null;
+  status: string;
+  allowed_skills: string[];
+  config?: Record<string, any>;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotSkill {
+  id: number;
+  skill_key: string;
+  name: string;
+  category: string;
+  description?: string | null;
+  trigger_scenarios: string[];
+  input_contract: Record<string, any>;
+  output_contract: Record<string, any>;
+  evidence_rules: Record<string, any>;
+  required_permission?: string | null;
+  enabled: boolean;
+  implementation_status: string;
+  config?: Record<string, any>;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotConversation {
+  id: number;
+  conversation_id: string;
+  profile_key: string;
+  title?: string | null;
+  simulated_user_role?: string | null;
+  channel_type: string;
+  status: string;
+  created_by_name?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotMessage {
+  id: number;
+  role: 'user' | 'assistant' | 'system' | string;
+  content: string;
+  content_type: string;
+  source?: string | null;
+  meta?: Record<string, any>;
+  created_at?: string | null;
+}
+
+export interface BotEvidenceRecord {
+  evidence_id: string;
+  source_type: string;
+  title?: string;
+  source?: string | null;
+  category?: string | null;
+  source_url?: string | null;
+  published_at?: string | null;
+  amount_wan?: number | null;
+  buyer?: string | null;
+  region?: string | null;
+  score?: number | null;
+  snippet?: string | null;
+  record_id?: number | null;
+}
+
+export interface BotToolCall {
+  id?: number;
+  skill_run_id?: number;
+  tool_name: string;
+  status: string;
+  input_payload?: Record<string, any>;
+  output_payload?: Record<string, any>;
+  duration_ms?: number | null;
+  error_message?: string | null;
+  created_at?: string | null;
+}
+
+export interface BotSkillRun {
+  id?: number;
+  run_id: string;
+  conversation_pk?: number | null;
+  message_id?: number | null;
+  profile_key: string;
+  skill_key: string;
+  skill_name?: string;
+  status: string;
+  input_payload?: Record<string, any>;
+  output_payload?: Record<string, any>;
+  output?: Record<string, any>;
+  evidence_records: BotEvidenceRecord[];
+  started_at?: string | null;
+  finished_at?: string | null;
+  duration_ms?: number | null;
+  error_message?: string | null;
+  created_at?: string | null;
+  tool_calls?: BotToolCall[];
+}
+
+export interface BotChatTestResult {
+  conversation: BotConversation;
+  user_message: BotMessage;
+  assistant_message: BotMessage;
+  selected_skills: BotSkillRun[];
+  evidence_records: BotEvidenceRecord[];
+  answer: {
+    content: string;
+    llm_used: boolean;
+    risk_flags?: string[];
+  };
+}
+
+export interface BotKnowledgeFile {
+  id: number;
+  file_id: string;
+  title: string;
+  file_name?: string | null;
+  content_type?: string | null;
+  source_type: string;
+  category: string;
+  status: string;
+  chunk_count: number;
+  uploaded_by?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotChannelBinding {
+  id: number;
+  channel_key: string;
+  channel_type: string;
+  channel_name: string;
+  bot_profile_key: string;
+  external_id?: string | null;
+  binding_config?: Record<string, any>;
+  status: string;
+  last_seen_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotAuditLog {
+  id: number;
+  event_type: string;
+  profile_key?: string | null;
+  conversation_id?: string | null;
+  skill_key?: string | null;
+  actor_name?: string | null;
+  payload?: Record<string, any>;
+  created_at?: string | null;
+}
+
 export interface BotBroadcastItem {
   id: number;
   title: string;
@@ -900,6 +1065,111 @@ export interface BotBroadcastPayload {
   target_type?: 'configured_group';
   target_payload?: Record<string, any>;
   at_all?: boolean;
+}
+
+export async function fetchBotOverview() {
+  return request<BotOverview>('/api/bot/overview', { method: 'GET' });
+}
+
+export async function fetchBotProfiles() {
+  return request<BotProfile[]>('/api/bot/profiles', { method: 'GET' });
+}
+
+export async function fetchBotSkills(params?: { category?: string }) {
+  return request<BotSkill[]>('/api/bot/skills', { method: 'GET', params });
+}
+
+export async function updateBotSkill(skillKey: string, data: { enabled?: boolean; config?: Record<string, any> }) {
+  return request<BotSkill>(`/api/bot/skills/${skillKey}`, { method: 'PUT', data });
+}
+
+export async function runBotChatTest(data: {
+  profile_key: string;
+  message: string;
+  conversation_id?: string;
+  simulated_user_role?: string;
+}) {
+  return request<BotChatTestResult>('/api/bot/chat/test', {
+    method: 'POST',
+    data,
+    timeout: LONG_TASK_TIMEOUT_MS,
+  });
+}
+
+export async function fetchBotConversations(params?: {
+  profile_key?: string;
+  page?: number;
+  page_size?: number;
+}) {
+  return request<{ total: number; items: BotConversation[] }>('/api/bot/conversations', { method: 'GET', params });
+}
+
+export async function fetchBotConversationDetail(conversationId: string) {
+  return request<{
+    conversation: BotConversation;
+    messages: BotMessage[];
+    skill_runs: BotSkillRun[];
+  }>(`/api/bot/conversations/${conversationId}`, { method: 'GET' });
+}
+
+export async function fetchBotKnowledgeFiles(params?: {
+  category?: string;
+  page?: number;
+  page_size?: number;
+}) {
+  return request<{ total: number; items: BotKnowledgeFile[] }>('/api/bot/knowledge/files', { method: 'GET', params });
+}
+
+export async function createBotKnowledgeText(data: {
+  title: string;
+  category?: string;
+  text_content: string;
+}) {
+  return request<BotKnowledgeFile>('/api/bot/knowledge/text', { method: 'POST', data });
+}
+
+export async function uploadBotKnowledgeFile(data: {
+  title: string;
+  category?: string;
+  file: File;
+}) {
+  const form = new FormData();
+  form.append('title', data.title);
+  form.append('category', data.category || 'general');
+  form.append('file', data.file);
+  const resp = await fetch('/api/bot/knowledge/upload', {
+    method: 'POST',
+    credentials: 'same-origin',
+    body: form,
+  });
+  const body = await resp.json().catch(() => ({}));
+  if (!resp.ok) {
+    throw Object.assign(new Error(body?.detail || body?.message || '知识文件上传失败'), { data: body });
+  }
+  return body as BotKnowledgeFile;
+}
+
+export async function searchBotKnowledge(query: string) {
+  return request<{ query: string; evidence_records: BotEvidenceRecord[]; conversation: BotConversation }>(
+    '/api/bot/knowledge/search',
+    { method: 'POST', data: { query }, timeout: LONG_TASK_TIMEOUT_MS },
+  );
+}
+
+export async function fetchBotChannelBindings() {
+  return request<BotChannelBinding[]>('/api/bot/channel-bindings', { method: 'GET' });
+}
+
+export async function fetchBotSkillRuns(params?: {
+  skill_key?: string;
+  page?: number;
+  page_size?: number;
+}) {
+  return request<{ total: number; items: BotSkillRun[] }>('/api/bot/skill-runs', { method: 'GET', params });
+}
+
+export async function fetchBotAuditLogs(params?: { page?: number; page_size?: number }) {
+  return request<{ total: number; items: BotAuditLog[] }>('/api/bot/audit-logs', { method: 'GET', params });
 }
 
 export async function fetchBotBroadcasts(params?: {

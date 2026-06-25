@@ -309,6 +309,10 @@ required = {
     "opportunity_leads", "evidence_records", "intelligence_events",
     "crawler_task_locks", "crawler_task_runs", "report_pages",
     "department_weekly_reports", "bot_broadcasts",
+    "bot_profiles", "bot_skills", "bot_conversations", "bot_messages",
+    "bot_skill_runs", "bot_tool_calls", "bot_knowledge_files",
+    "bot_knowledge_chunks", "bot_channel_bindings", "bot_test_cases",
+    "bot_audit_logs",
 }
 missing = sorted(required - tables)
 conn.close()

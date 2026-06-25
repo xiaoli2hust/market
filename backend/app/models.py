@@ -628,6 +628,282 @@ class BotBroadcast(Base):
     )
 
 
+class BotProfile(Base):
+    """机器人定义：描述一个可运行 Agent 的身份、边界和默认 Skill。"""
+
+    __tablename__ = "bot_profiles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    profile_key: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(100), nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    system_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    default_role: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="enabled", default="enabled", index=True)
+    allowed_skills: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class BotSkill(Base):
+    """Skill 契约：机器人可调用能力包，包含输入输出、证据和权限规则。"""
+
+    __tablename__ = "bot_skills"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    skill_key: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    category: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    trigger_scenarios: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    input_contract: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    output_contract: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    evidence_rules: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    required_permission: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true", default=True)
+    implementation_status: Mapped[str] = mapped_column(
+        String(30), nullable=False, server_default="implemented", default="implemented"
+    )
+    config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class BotConversation(Base):
+    """机器人会话：对话测试台和未来群聊入口共用的会话容器。"""
+
+    __tablename__ = "bot_conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    profile_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    simulated_user_role: Mapped[Optional[str]] = mapped_column(String(80), nullable=True)
+    channel_type: Mapped[str] = mapped_column(
+        String(30), nullable=False, server_default="test_console", default="test_console", index=True
+    )
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="active", default="active", index=True)
+    created_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    messages: Mapped[list["BotMessage"]] = relationship(
+        "BotMessage", back_populates="conversation", cascade="all, delete-orphan"
+    )
+
+    __table_args__ = (
+        Index("ix_bot_conversations_profile_created", "profile_key", "created_at"),
+    )
+
+
+class BotMessage(Base):
+    """机器人消息：保存用户输入、机器人回复和系统过程消息。"""
+
+    __tablename__ = "bot_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_pk: Mapped[int] = mapped_column(
+        ForeignKey("bot_conversations.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    role: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str] = mapped_column(String(30), nullable=False, server_default="text", default="text")
+    source: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    meta: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+    conversation: Mapped["BotConversation"] = relationship("BotConversation", back_populates="messages")
+
+    __table_args__ = (
+        Index("ix_bot_messages_conversation_created", "conversation_pk", "created_at"),
+    )
+
+
+class BotSkillRun(Base):
+    """Skill 运行记录：每次 Agent 调用 Skill 的输入、输出、证据和错误。"""
+
+    __tablename__ = "bot_skill_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    conversation_pk: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("bot_conversations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    message_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("bot_messages.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    profile_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    skill_key: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    input_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    output_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    evidence_records: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_bot_skill_runs_skill_created", "skill_key", "created_at"),
+        Index("ix_bot_skill_runs_profile_created", "profile_key", "created_at"),
+    )
+
+
+class BotToolCall(Base):
+    """工具调用记录：Skill 内部访问数据库、知识、外部接口等步骤。"""
+
+    __tablename__ = "bot_tool_calls"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    skill_run_id: Mapped[int] = mapped_column(
+        ForeignKey("bot_skill_runs.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    tool_name: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    input_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    output_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class BotKnowledgeFile(Base):
+    """知识空间文件：机器人可检索材料的原文与解析状态。"""
+
+    __tablename__ = "bot_knowledge_files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_id: Mapped[str] = mapped_column(String(80), nullable=False, unique=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    file_name: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    content_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    source_type: Mapped[str] = mapped_column(String(40), nullable=False, server_default="manual_upload", default="manual_upload")
+    category: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    text_content: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="indexed", default="indexed", index=True)
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", default=0)
+    uploaded_by: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    chunks: Mapped[list["BotKnowledgeChunk"]] = relationship(
+        "BotKnowledgeChunk", back_populates="file", cascade="all, delete-orphan"
+    )
+
+
+class BotKnowledgeChunk(Base):
+    """知识切片：用于可追溯检索。当前版本使用关键词检索，后续可替换向量索引。"""
+
+    __tablename__ = "bot_knowledge_chunks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    file_pk: Mapped[int] = mapped_column(
+        ForeignKey("bot_knowledge_files.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    title: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    keywords: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    file: Mapped["BotKnowledgeFile"] = relationship("BotKnowledgeFile", back_populates="chunks")
+
+    __table_args__ = (
+        Index("ix_bot_knowledge_chunks_file_index", "file_pk", "chunk_index"),
+    )
+
+
+class BotChannelBinding(Base):
+    """群聊接入绑定：描述外部群和机器人 Profile 的绑定关系。"""
+
+    __tablename__ = "bot_channel_bindings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    channel_key: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
+    channel_type: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
+    channel_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    bot_profile_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    external_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    binding_config: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="active", default="active", index=True)
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class BotTestCase(Base):
+    """机器人测试用例：把高频问题固化成验收资产。"""
+
+    __tablename__ = "bot_test_cases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    profile_key: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    input_text: Mapped[str] = mapped_column(Text, nullable=False)
+    expected_skills: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    expected_contains: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="active", default="active")
+    created_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class BotAuditLog(Base):
+    """机器人审计：记录对话、配置、Skill 和外部动作的关键事件。"""
+
+    __tablename__ = "bot_audit_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    event_type: Mapped[str] = mapped_column(String(50), nullable=False, index=True)
+    profile_key: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    conversation_id: Mapped[Optional[str]] = mapped_column(String(80), nullable=True, index=True)
+    skill_key: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
+    actor_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    actor_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+
 class APIKeyRecord(Base):
     """API Key 管理。"""
 
@@ -695,6 +971,17 @@ __all__ = [
     "SystemUser",
     "OperationLog",
     "BotBroadcast",
+    "BotProfile",
+    "BotSkill",
+    "BotConversation",
+    "BotMessage",
+    "BotSkillRun",
+    "BotToolCall",
+    "BotKnowledgeFile",
+    "BotKnowledgeChunk",
+    "BotChannelBinding",
+    "BotTestCase",
+    "BotAuditLog",
     "APIKeyRecord",
     "DingtalkConfig",
 ]
