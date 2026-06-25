@@ -10,6 +10,7 @@ import {
   MenuUnfoldOutlined,
   RadarChartOutlined,
   RiseOutlined,
+  RobotOutlined,
   UserOutlined,
 } from '@ant-design/icons';
 import { getCurrentUser, logout, userHasPermission } from '@/services/api';
@@ -91,6 +92,11 @@ const EditorialLayout: React.FC = () => {
               商机中心
             </NavItem>
           )}
+          {can('bot:view') && (
+            <NavItem to="/bot" icon={<RobotOutlined />} active={location.pathname.startsWith('/bot')}>
+              机器人中心
+            </NavItem>
+          )}
           {can('management:view') && (
             <NavItem to="/management" icon={<ControlOutlined />} active={location.pathname.startsWith('/management')}>
               管理中心
@@ -153,6 +159,7 @@ const EditorialLayout: React.FC = () => {
 
 function canAccessPath(pathname: string, can: (permission: string) => boolean): boolean {
   if (pathname.startsWith('/management')) return can('management:view');
+  if (pathname.startsWith('/bot')) return can('bot:view');
   if (pathname.startsWith('/intelligence')) return can('intelligence:view');
   if (pathname.startsWith('/opportunities')) return can('opportunities:view');
   if (pathname.startsWith('/dashboard')) return can('dashboard:view');
@@ -180,6 +187,7 @@ const NavItem: React.FC<{
 
 function getCurrentPageTitle(pathname: string): string {
   if (pathname.startsWith('/management')) return '管理中心';
+  if (pathname.startsWith('/bot')) return '机器人中心';
   if (pathname.startsWith('/intelligence/opportunities')) return '标讯线索确认';
   if (pathname.startsWith('/intelligence')) return '市场洞察';
   if (pathname.startsWith('/opportunities')) return '商机中心';

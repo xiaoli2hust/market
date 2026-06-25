@@ -221,8 +221,13 @@ def check_mutating_routes_use_business_permissions() -> None:
             'require_permission("opportunities:view")',
             'require_permission("opportunities:manage")',
         ],
+        "backend/app/routers/bot.py": [
+            'require_permission("bot:view")',
+            'require_permission("bot:broadcast")',
+        ],
         "backend/app/permissions.py": [
             '"opportunities:manage"',
+            '"bot:broadcast"',
         ],
     }
     for path, markers in contracts.items():
@@ -303,6 +308,7 @@ required = {
     "schedule_config", "system_users", "api_key_records", "dingtalk_configs",
     "opportunity_leads", "evidence_records", "intelligence_events",
     "crawler_task_locks", "crawler_task_runs", "report_pages",
+    "department_weekly_reports", "bot_broadcasts",
 }
 missing = sorted(required - tables)
 conn.close()

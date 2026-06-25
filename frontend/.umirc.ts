@@ -64,6 +64,7 @@ export default defineConfig({
         { path: '/intelligence/opportunities', component: './OpportunityRadar', name: '标讯线索确认' },
         { path: '/intelligence', component: './Intelligence', name: '市场洞察' },
         { path: '/opportunities', component: './Opportunities', name: '商机中心' },
+        { path: '/bot', component: './BotCenter', name: '机器人中心' },
         { path: '/management', component: './Management', name: '管理中心' },
       ],
     },

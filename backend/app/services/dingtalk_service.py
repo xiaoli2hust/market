@@ -328,6 +328,7 @@ async def send_text(
     db: AsyncSession,
     content: str,
     at_mobiles: list[str] | None = None,
+    is_at_all: bool = False,
 ) -> dict[str, Any]:
     """发送文本消息。"""
     cfg = await get_webhook_config(db)
@@ -352,7 +353,9 @@ async def send_text(
         "text": {"content": content},
     }
     if at_mobiles:
-        msg["at"] = {"atMobiles": at_mobiles, "isAtAll": False}
+        msg["at"] = {"atMobiles": at_mobiles, "isAtAll": is_at_all}
+    elif is_at_all:
+        msg["at"] = {"atMobiles": [], "isAtAll": True}
 
     return await send_webhook_message(cfg["webhook_url"], cfg["secret"], msg)
 

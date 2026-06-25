@@ -9,6 +9,7 @@ from . import (
     activities,
     auth,
     bidding_express,
+    bot,
     crawler,
     crawler_config,
     dingtalk_robot,
@@ -35,6 +36,7 @@ api_router.include_router(express.router)
 api_router.include_router(bidding_express.router)
 api_router.include_router(opportunity_leads.router)
 api_router.include_router(dingtalk_robot.router)
+api_router.include_router(bot.router)
 # 管理中心新增
 api_router.include_router(crawler_config.router)
 api_router.include_router(llm_config.router)

@@ -154,6 +154,8 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
     'intelligence:view',
     'opportunities:view',
     'opportunities:manage',
+    'bot:view',
+    'bot:broadcast',
     'management:view',
     'management:crawler',
     'management:llm',
@@ -172,6 +174,8 @@ export const PERMISSION_LABELS: Record<string, string> = {
   'intelligence:view': '查看市场洞察',
   'opportunities:view': '查看商机中心',
   'opportunities:manage': '确认与流转线索',
+  'bot:view': '查看机器人中心',
+  'bot:broadcast': '发送机器人群发消息',
   'management:view': '进入管理中心',
   'management:crawler': '管理采集任务',
   'management:llm': '管理模型与提示词',
@@ -859,6 +863,75 @@ export async function updateOpportunityLeadStatus(id: number, status: Opportunit
   return request<OpportunityLead>(`/api/opportunity-leads/${id}/status`, {
     method: 'PUT',
     data: { status },
+  });
+}
+
+/* ---------- 机器人中心 ---------- */
+
+export type BotBroadcastStatus = 'draft' | 'sending' | 'sent' | 'failed';
+export type BotMessageType = 'markdown' | 'text';
+
+export interface BotBroadcastItem {
+  id: number;
+  title: string;
+  content: string;
+  message_type: BotMessageType;
+  target_type: string;
+  target_summary?: string | null;
+  target_payload?: Record<string, any>;
+  at_all: boolean;
+  status: BotBroadcastStatus;
+  created_by?: number | null;
+  created_by_name?: string | null;
+  sent_by?: number | null;
+  sent_by_name?: string | null;
+  sent_at?: string | null;
+  result_message?: string | null;
+  result_payload?: Record<string, any>;
+  error_message?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface BotBroadcastPayload {
+  title: string;
+  content: string;
+  message_type?: BotMessageType;
+  target_type?: 'configured_group';
+  target_payload?: Record<string, any>;
+  at_all?: boolean;
+}
+
+export async function fetchBotBroadcasts(params?: {
+  status?: BotBroadcastStatus;
+  page?: number;
+  page_size?: number;
+}) {
+  return request<{ total: number; items: BotBroadcastItem[] }>('/api/bot/broadcasts', {
+    method: 'GET',
+    params,
+  });
+}
+
+export async function createBotBroadcast(data: BotBroadcastPayload) {
+  return request<BotBroadcastItem>('/api/bot/broadcasts', {
+    method: 'POST',
+    data,
+  });
+}
+
+export async function sendBotBroadcast(data: BotBroadcastPayload) {
+  return request<BotBroadcastItem>('/api/bot/broadcasts/send', {
+    method: 'POST',
+    data,
+    timeout: LONG_TASK_TIMEOUT_MS,
+  });
+}
+
+export async function sendExistingBotBroadcast(id: number) {
+  return request<BotBroadcastItem>(`/api/bot/broadcasts/${id}/send`, {
+    method: 'POST',
+    timeout: LONG_TASK_TIMEOUT_MS,
   });
 }
 

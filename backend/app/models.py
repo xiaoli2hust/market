@@ -585,6 +585,49 @@ class OperationLog(Base):
     )
 
 
+class BotBroadcast(Base):
+    """机器人群发记录：保存人工群发、自动推送和失败重试的完整结果。"""
+
+    __tablename__ = "bot_broadcasts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    title: Mapped[str] = mapped_column(String(200), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    message_type: Mapped[str] = mapped_column(
+        String(30), nullable=False, server_default="markdown", default="markdown"
+    )
+    target_type: Mapped[str] = mapped_column(
+        String(40), nullable=False, server_default="configured_group", default="configured_group"
+    )
+    target_summary: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    target_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    at_all: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, server_default="draft", default="draft", index=True
+    )
+    created_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    created_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    sent_by: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sent_by_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    result_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    result_payload: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    __table_args__ = (
+        Index("ix_bot_broadcasts_status_created", "status", "created_at"),
+        Index("ix_bot_broadcasts_target_created", "target_type", "created_at"),
+    )
+
+
 class APIKeyRecord(Base):
     """API Key 管理。"""
 
@@ -642,6 +685,7 @@ __all__ = [
     "OpportunityLead",
     "DailyExpress",
     "ReportPage",
+    "DepartmentWeeklyReport",
     "CrawlerSource",
     "KeywordConfig",
     "ScheduleConfig",
@@ -650,6 +694,7 @@ __all__ = [
     "LLMCallLog",
     "SystemUser",
     "OperationLog",
+    "BotBroadcast",
     "APIKeyRecord",
     "DingtalkConfig",
 ]

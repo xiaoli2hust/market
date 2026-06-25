@@ -16,6 +16,8 @@ ROLES: dict[str, dict[str, Any]] = {
             "intelligence:view",
             "opportunities:view",
             "opportunities:manage",
+            "bot:view",
+            "bot:broadcast",
             "management:view",
             "management:crawler",
             "management:llm",
