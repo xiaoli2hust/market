@@ -33,7 +33,7 @@ USAGE
 
 require_env() {
   if [[ ! -f "$ENV_FILE" ]]; then
-    echo "缺少 $ENV_FILE。先执行: ./deploy/marketctl.sh init" >&2
+    echo "缺少 ${ENV_FILE}。先执行: ./deploy/marketctl.sh init" >&2
     exit 1
   fi
 }
