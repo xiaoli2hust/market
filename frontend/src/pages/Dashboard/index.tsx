@@ -208,8 +208,8 @@ const Dashboard: React.FC = () => {
       const resp = await fetchReports(params);
       setReports(resp?.items || []);
       setReportTotal(resp?.total || 0);
-    } catch {
-      /* silent */
+    } catch (err) {
+      console.error('[Dashboard] 加载报告失败:', err);
     } finally {
       setReportLoading(false);
     }
@@ -461,8 +461,8 @@ const Dashboard: React.FC = () => {
     try {
       const resp = await fetchExpressList({ page: 1, page_size: 5 });
       setExpressList(resp?.items || []);
-    } catch {
-      /* silent */
+    } catch (err) {
+      console.error('[Dashboard] 加载速递列表失败:', err);
     } finally {
       setExpressLoading(false);
     }
@@ -496,7 +496,9 @@ const Dashboard: React.FC = () => {
     try {
       const resp = await getLatestBiddingExpress();
       setBiddingExpress(resp);
-    } catch { /* silent */ }
+    } catch (err) {
+      console.error('[Dashboard] 加载标讯速递失败:', err);
+    }
   }, []);
 
   const handleGenerateBidding = async () => {
@@ -577,7 +579,16 @@ const Dashboard: React.FC = () => {
   useEffect(() => {
     loadActivities();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filter]);
+  }, [
+    filter.mode,
+    filter.range[0]?.valueOf(),
+    filter.range[1]?.valueOf(),
+    filter.userId,
+    filter.department,
+    filter.role,
+    filter.actionTypes.join(','),
+    filter.keyword,
+  ]);
 
   /* —— 模式切换 —— */
   const switchMode = useCallback((mode: 'daily' | 'weekly' | 'custom') => {

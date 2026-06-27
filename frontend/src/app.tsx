@@ -44,8 +44,10 @@ export function onRouteChange({ location }: { location: { pathname: string } }) 
 export const request: RequestConfig = {
   timeout: 15000,
   errorConfig: {
-    errorHandler: (error: any) => {
-      const status = error?.response?.status || error?.status;
+    errorHandler: (error: unknown) => {
+      const e = error as Record<string, unknown>;
+      const response = e?.response as Record<string, unknown> | undefined;
+      const status = (response?.status as number) || (e?.status as number);
       if (status === 401) {
         notification.warning({ message: '登录已失效，请重新登录' });
         clearAuth();
@@ -57,8 +59,20 @@ export const request: RequestConfig = {
     },
   },
   requestInterceptors: [
-    (url: string, options: any) => {
-      return { url, options: { ...options, credentials: 'same-origin' } };
+    (url: string, options: Record<string, unknown>) => {
+      // 添加 CSRF 防护头部 + 凭证
+      const headers = (options.headers as Record<string, string>) || {};
+      return {
+        url,
+        options: {
+          ...options,
+          credentials: 'same-origin',
+          headers: {
+            ...headers,
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+        },
+      };
     },
   ],
 };

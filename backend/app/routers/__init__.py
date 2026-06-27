@@ -7,6 +7,7 @@ from fastapi import APIRouter
 
 from . import (
     activities,
+    aipaas_sync,
     auth,
     bidding_express,
     bot,
@@ -44,5 +45,7 @@ api_router.include_router(users.router)
 api_router.include_router(settings.router)
 # 前端兼容：/api/users/* → 复用 staff 逻辑
 api_router.include_router(users_compat.router)
+# AIPAAS 日报拉取
+api_router.include_router(aipaas_sync.router)
 
 __all__ = ["api_router"]

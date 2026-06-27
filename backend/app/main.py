@@ -13,6 +13,9 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse
 from sqlalchemy import text
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from . import __version__
 from .config import assert_production_security, settings
@@ -183,6 +186,8 @@ def _auto_migrate_intelligence_sqlite(conn) -> None:
             "region": "VARCHAR(100)",
             "notice_type": "VARCHAR(80)",
             "matched_keywords": "JSON",
+            "is_invalid": "BOOLEAN NOT NULL DEFAULT 0",
+            "invalid_reason": "VARCHAR(500)",
         }.items():
             if column_name not in crawler_cols:
                 conn.execute(f"ALTER TABLE crawler_items ADD COLUMN {column_name} {ddl}")
@@ -190,6 +195,7 @@ def _auto_migrate_intelligence_sqlite(conn) -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS ix_crawler_items_buyer ON crawler_items (buyer)")
         conn.execute("CREATE INDEX IF NOT EXISTS ix_crawler_items_region ON crawler_items (region)")
         conn.execute("CREATE INDEX IF NOT EXISTS ix_crawler_items_notice_type ON crawler_items (notice_type)")
+        conn.execute("CREATE INDEX IF NOT EXISTS ix_crawler_items_is_invalid ON crawler_items (is_invalid)")
         conn.execute(
             "CREATE INDEX IF NOT EXISTS ix_crawler_items_category_amount ON crawler_items (category, amount_wan)"
         )
@@ -859,6 +865,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+class CSRFProtectionMiddleware(BaseHTTPMiddleware):
+    """CSRF 防护：状态修改请求必须携带 JSON Content-Type 或自定义头部。
+
+    原理：浏览器自动附加 Cookie 的跨站请求无法设置 Content-Type: application/json
+    或自定义 X-Requested-With 头部，因此可以阻断 CSRF 攻击。
+    """
+
+    async def dispatch(self, request: Request, call_next):  # noqa: ANN001
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            content_type = request.headers.get("content-type", "")
+            has_json = "application/json" in content_type
+            has_custom_header = "x-requested-with" in request.headers
+            if not has_json and not has_custom_header:
+                return JSONResponse(
+                    {"detail": "CSRF check failed: 请求必须包含 Content-Type: application/json 或 X-Requested-With 头部"},
+                    status_code=403,
+                )
+        return await call_next(request)
+
+
+app.add_middleware(CSRFProtectionMiddleware)
 
 app.include_router(api_router, prefix="/api")
 

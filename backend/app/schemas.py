@@ -279,4 +279,281 @@ __all__ = [
     "ImportJsonResponse",
     "LoginRequest",
     "LoginResponse",
+    # Bot schemas
+    "BotProfileRequest",
+    "BotSkillUpdateRequest",
+    "BotChatTestRequest",
+    "BotKnowledgeTextRequest",
+    "BotKnowledgeUpdateRequest",
+    "BotKnowledgeSearchRequest",
+    "BotInboundTestRequest",
+    "BotChannelAdapterRequest",
+    "BotChannelBindingCreateRequest",
+    "BotChannelBindingUpdateRequest",
+    "BotInboxUpdateRequest",
+    "BotHandoffRequest",
+    "BotTaskRequest",
+    "BotApprovalRequest",
+    "BotTestCaseRequest",
+    "BotIntentCorrectionRequest",
+    "BotCollaborationRequest",
+    "BotReleaseRequest",
+    "BotFeedbackRequest",
+    "BotKnowledgeSyncRequest",
+    "BotCompliancePolicyRequest",
+    "BroadcastRequest",
 ]
+
+
+# ---------- Bot Center -------------------------------------------------------
+
+
+class BotProfileRequest(APIBaseModel):
+    """创建/更新机器人 Profile。"""
+
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True, extra="allow")
+
+    name: str = ""
+    profile_key: str = ""
+    description: str = ""
+    system_prompt: str = ""
+    default_role: str = ""
+    status: str = ""
+    allowed_skills: list[str] = Field(default_factory=list)
+    config: dict[str, Any] = Field(default_factory=dict)
+
+
+class BotSkillUpdateRequest(APIBaseModel):
+    """更新 Skill 配置。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    enabled: bool | None = None
+    config: dict[str, Any] | None = None
+    trigger_scenarios: list[str] | None = None
+    evidence_rules: dict[str, Any] | None = None
+    input_contract: dict[str, Any] | None = None
+    output_contract: dict[str, Any] | None = None
+
+
+class BotChatTestRequest(APIBaseModel):
+    """对话测试台请求。"""
+
+    profile_key: str = "management_assistant_agent"
+    conversation_id: str | None = None
+    simulated_user_role: str | None = None
+    message: str = ""
+
+
+class BotKnowledgeTextRequest(APIBaseModel):
+    """保存文本到知识空间。"""
+
+    title: str = ""
+    text_content: str = ""
+    category: str = "general"
+    owner_profile_key: str | None = None
+    visibility_scope: str = "all_bots"
+    tags: list[str] = Field(default_factory=list)
+    review_status: str = "approved"
+
+
+class BotKnowledgeUpdateRequest(APIBaseModel):
+    """更新知识文件元数据。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    status: str | None = None
+    visibility_scope: str | None = None
+    tags: list[str] | None = None
+    review_status: str | None = None
+
+
+class BotKnowledgeSearchRequest(APIBaseModel):
+    """知识检索请求。"""
+
+    query: str = ""
+
+
+class BotInboundTestRequest(APIBaseModel):
+    """模拟入站消息。"""
+
+    channel_key: str = "dingtalk_default"
+    content: str = ""
+    sender_id: str | None = None
+    sender_name: str | None = None
+
+
+class BotChannelAdapterRequest(APIBaseModel):
+    """新增/更新渠道适配器。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    adapter_key: str = ""
+    channel_type: str = ""
+    name: str = ""
+    auth_config: dict[str, Any] = Field(default_factory=dict)
+    rate_limit: dict[str, Any] = Field(default_factory=dict)
+    status: str = "active"
+
+
+class BotChannelBindingCreateRequest(APIBaseModel):
+    """新增群聊绑定。"""
+
+    channel_key: str = ""
+    channel_type: str = "dingtalk"
+    channel_name: str = "未命名群聊"
+    bot_profile_key: str = "management_assistant_agent"
+    external_id: str = ""
+    binding_config: dict[str, Any] = Field(default_factory=dict)
+    status: str = "active"
+
+
+class BotChannelBindingUpdateRequest(APIBaseModel):
+    """更新群聊绑定。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    channel_name: str | None = None
+    channel_type: str | None = None
+    bot_profile_key: str | None = None
+    external_id: str | None = None
+    status: str | None = None
+    binding_config: dict[str, Any] | None = None
+
+
+class BotInboxUpdateRequest(APIBaseModel):
+    """更新收件箱条目。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    status: str | None = None
+    assignee: str | None = None
+    priority: str | None = None
+    conclusion: str | None = None
+
+
+class BotHandoffRequest(APIBaseModel):
+    """人工接管请求。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    assignee: str = ""
+    reason: str = ""
+    priority: str = "normal"
+
+
+class BotTaskRequest(APIBaseModel):
+    """创建自动任务。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    title: str = ""
+    task_type: str = ""
+    profile_key: str = ""
+    schedule_type: str = ""
+    schedule_config: dict[str, Any] = Field(default_factory=dict)
+    input_payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class BotApprovalRequest(APIBaseModel):
+    """创建审批请求。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    action_type: str = ""
+    title: str = ""
+    profile_key: str = ""
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class BotTestCaseRequest(APIBaseModel):
+    """创建测试用例。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    name: str = ""
+    profile_key: str = ""
+    input_text: str = ""
+    expected_skills: list[str] = Field(default_factory=list)
+    expected_contains: list[str] = Field(default_factory=list)
+    required_evidence: str | None = None
+    priority: str = "normal"
+
+
+class BotIntentCorrectionRequest(APIBaseModel):
+    """创建意图纠正。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    phrase: str = ""
+    profile_key: str = ""
+    expected_skills: list[str] = Field(default_factory=list)
+    notes: str = ""
+
+
+class BotCollaborationRequest(APIBaseModel):
+    """创建协作运行。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    title: str = ""
+    lead_profile_key: str = ""
+    participant_profiles: list[str] = Field(default_factory=list)
+    input_text: str = ""
+
+
+class BotReleaseRequest(APIBaseModel):
+    """创建发布版本。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    profile_key: str = ""
+    description: str = ""
+    changelog: str = ""
+
+
+class BotFeedbackRequest(APIBaseModel):
+    """记录用户反馈。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    conversation_id: str = ""
+    message_id: str = ""
+    rating: str = ""
+    comment: str = ""
+    category: str = ""
+
+
+class BotKnowledgeSyncRequest(APIBaseModel):
+    """创建知识同步任务。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    source_type: str = ""
+    source_config: dict[str, Any] = Field(default_factory=dict)
+    target_category: str = "general"
+    schedule: str = "manual"
+
+
+class BotCompliancePolicyRequest(APIBaseModel):
+    """新增/更新合规策略。"""
+
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+    policy_key: str = ""
+    name: str = ""
+    description: str = ""
+    retention_days: int = 90
+    content_filters: dict[str, Any] = Field(default_factory=dict)
+    enabled: bool = True
+
+
+class BroadcastRequest(APIBaseModel):
+    """群发消息请求。"""
+
+    title: str = ""
+    content: str = ""
+    message_type: str = "markdown"
+    target_type: str = ""
+    target_payload: dict[str, Any] | None = None
+    at_all: bool = False

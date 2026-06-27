@@ -6,7 +6,12 @@
 
 from __future__ import annotations
 
+import logging
+import secrets
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
@@ -26,12 +31,18 @@ class Settings(BaseSettings):
     DINGTALK_WEBHOOK_URL: str = ""
     DINGTALK_SECRET: str = ""
 
+    # AIPAAS 日报拉取
+    AIPAAS_BASE_URL: str = ""
+    AIPAAS_APP_ID: str = ""
+    AIPAAS_SYNC_ENABLED: bool = False
+    AIPAAS_SYNC_INTERVAL_MINUTES: int = 60
+
     # 结构化标讯
     JIANYU_USERNAME: str = ""
     JIANYU_PASSWORD: str = ""
 
     # Auth
-    JWT_SECRET_KEY: str = "dev-only-change-me-in-production-32-byte-minimum"
+    JWT_SECRET_KEY: str = ""
     SECRET_ENCRYPTION_KEY: str = ""
     JWT_ALGORITHM: str = "HS256"
     JWT_EXPIRE_HOURS: int = 24
@@ -39,10 +50,10 @@ class Settings(BaseSettings):
     AUTH_COOKIE_SECURE: bool = False
     AUTH_COOKIE_SAMESITE: str = "strict"
     ADMIN_USERNAME: str = "admin"
-    ADMIN_PASSWORD: str = "admin123"
+    ADMIN_PASSWORD: str = ""
 
     # Upload API Key (内网上传认证)
-    UPLOAD_API_KEY: str = "change-me-in-production"
+    UPLOAD_API_KEY: str = ""
 
     # CORS
     CORS_ORIGINS: list[str] = [
@@ -64,6 +75,47 @@ class Settings(BaseSettings):
 settings = Settings()
 
 
+# ---------------------------------------------------------------------------
+# 开发模式安全兜底：当环境变量未设置时自动生成随机值，避免使用硬编码弱凭证。
+# ---------------------------------------------------------------------------
+_DEV_WEAK_VALUES = {
+    "",
+    "admin123",
+    "change-me",
+    "change-me-in-production",
+    "please-change-me",
+    "dev-only-change-me-in-production-32-byte-minimum",
+    "dev-upload-key",
+}
+
+def _is_weak(value: str, min_length: int = 0) -> bool:
+    """检查凭证值是否过于简单（在弱值列表中或长度不足）。"""
+    clean = (value or "").strip()
+    if clean in _DEV_WEAK_VALUES:
+        return True
+    if min_length and len(clean) < min_length:
+        return True
+    return False
+
+if _is_weak(settings.JWT_SECRET_KEY, min_length=32):
+    settings.JWT_SECRET_KEY = secrets.token_urlsafe(48)
+    logger.warning(
+        "⚠️  未设置 JWT_SECRET_KEY，已使用随机开发值。生产环境请通过环境变量配置。"
+    )
+
+if _is_weak(settings.ADMIN_PASSWORD, min_length=12):
+    settings.ADMIN_PASSWORD = secrets.token_urlsafe(16)
+    logger.warning(
+        "⚠️  未设置 ADMIN_PASSWORD，已使用随机开发值。生产环境请通过环境变量配置。"
+    )
+
+if _is_weak(settings.UPLOAD_API_KEY, min_length=32):
+    settings.UPLOAD_API_KEY = secrets.token_urlsafe(32)
+    logger.warning(
+        "⚠️  未设置 UPLOAD_API_KEY，已使用随机开发值。生产环境请通过环境变量配置。"
+    )
+
+
 def is_sqlite_database(url: str | None = None) -> bool:
     """Return whether the configured database is local SQLite."""
 
@@ -74,6 +126,7 @@ def assert_production_security() -> None:
     """Fail fast when production-like deployments still use placeholder secrets."""
 
     if is_sqlite_database():
+        logger.warning("SQLite 模式跳过安全强度检查 — 仅限本地开发使用")
         return
 
     weak_values = {

@@ -204,13 +204,18 @@ export function userHasPermission(user: LoginResult['user'] | null | undefined, 
   return permissions.includes('*') || permissions.includes(permission);
 }
 
-export function getApiErrorMessage(error: any, fallback: string): string {
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (!error || typeof error !== 'object') return fallback;
+  const e = error as Record<string, unknown>;
+  const data = e.data as Record<string, unknown> | undefined;
+  const response = e.response as Record<string, unknown> | undefined;
+  const respData = response?.data as Record<string, unknown> | undefined;
   return (
-    error?.data?.detail
-    || error?.data?.message
-    || error?.response?.data?.detail
-    || error?.response?.data?.message
-    || error?.message
+    (data?.detail as string)
+    || (data?.message as string)
+    || (respData?.detail as string)
+    || (respData?.message as string)
+    || (e.message as string)
     || fallback
   );
 }

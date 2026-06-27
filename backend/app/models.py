@@ -136,6 +136,10 @@ class CrawlerItem(Base):
     is_pushed: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default="false", default=False
     )
+    is_invalid: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False, index=True
+    )
+    invalid_reason: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

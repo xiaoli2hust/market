@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -496,33 +496,37 @@ async def execute_crawlers(
 async def _acquire_crawler_task_lock(db: AsyncSession, crawler_name: str, lock_owner: str) -> bool:
     """Acquire a DB-backed crawler lock, allowing takeover only after TTL expiry."""
 
-    now = datetime.now(timezone.utc)
-    locked_until = now + CRAWLER_TASK_LOCK_TTL
-    try:
-        row = (
-            await db.execute(
-                select(CrawlerTaskLock)
-                .where(CrawlerTaskLock.name == crawler_name)
-                .with_for_update()
-            )
-        ).scalar_one_or_none()
-        if row and row.lock_owner:
-            existing_until = _ensure_aware_datetime(row.locked_until)
-            if existing_until and existing_until > now:
-                return False
+    for _attempt in range(3):
+        now = datetime.now(timezone.utc)
+        locked_until = now + CRAWLER_TASK_LOCK_TTL
+        try:
+            row = (
+                await db.execute(
+                    select(CrawlerTaskLock)
+                    .where(CrawlerTaskLock.name == crawler_name)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if row and row.lock_owner:
+                existing_until = _ensure_aware_datetime(row.locked_until)
+                if existing_until and existing_until > now:
+                    return False
 
-        if row is None:
-            row = CrawlerTaskLock(name=crawler_name)
-            db.add(row)
-        row.lock_owner = lock_owner
-        row.locked_at = now
-        row.locked_until = locked_until
-        row.heartbeat_at = now
-        await db.flush()
-        return True
-    except IntegrityError:
-        await _rollback_safely(db)
-        return False
+            if row is None:
+                row = CrawlerTaskLock(name=crawler_name)
+                db.add(row)
+            row.lock_owner = lock_owner
+            row.locked_at = now
+            row.locked_until = locked_until
+            row.heartbeat_at = now
+            await db.flush()
+            return True
+        except IntegrityError:
+            await _rollback_safely(db)
+            if _attempt < 2:
+                await asyncio.sleep(0.1 * (_attempt + 1))
+            continue
+    return False
 
 
 async def _release_crawler_task_lock(db: AsyncSession, crawler_name: str, lock_owner: str) -> None:
@@ -1814,5 +1818,84 @@ def _crawler_item_to_dict(item: CrawlerItem) -> dict[str, Any]:
         "matched_keywords": matched_keywords or None,
         "extra_data": extra_data or None,
         "is_pushed": item.is_pushed,
+        "is_invalid": item.is_invalid,
+        "invalid_reason": item.invalid_reason,
         "created_at": item.created_at.isoformat() if item.created_at else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# 爬虫数据管理：删除 & 标记
+# ---------------------------------------------------------------------------
+
+
+@crawler_router.delete("/items/{item_id}")
+async def delete_crawler_item(
+    item_id: int,
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("management:crawlers")),
+) -> dict[str, Any]:
+    """删除单条爬虫数据。"""
+    item = (await db.execute(select(CrawlerItem).where(CrawlerItem.id == item_id))).scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="数据不存在")
+    await db.delete(item)
+    await db.flush()
+    return {"success": True, "message": f"已删除: {item.title[:30]}"}
+
+
+@crawler_router.post("/items/batch-delete")
+async def batch_delete_crawler_items(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("management:crawlers")),
+) -> dict[str, Any]:
+    """批量删除爬虫数据。"""
+    ids = payload.get("ids") or []
+    if not ids or not isinstance(ids, list):
+        raise HTTPException(status_code=400, detail="请提供要删除的 ID 列表")
+    stmt = delete(CrawlerItem).where(CrawlerItem.id.in_(ids))
+    result = await db.execute(stmt)
+    await db.flush()
+    return {"success": True, "deleted_count": result.rowcount}
+
+
+@crawler_router.put("/items/{item_id}/mark")
+async def mark_crawler_item(
+    item_id: int,
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("management:crawlers")),
+) -> dict[str, Any]:
+    """标记爬虫数据为无效/有问题。"""
+    item = (await db.execute(select(CrawlerItem).where(CrawlerItem.id == item_id))).scalar_one_or_none()
+    if not item:
+        raise HTTPException(status_code=404, detail="数据不存在")
+    is_invalid = bool(payload.get("is_invalid", True))
+    reason = str(payload.get("reason") or "").strip()[:500]
+    item.is_invalid = is_invalid
+    item.invalid_reason = reason if is_invalid else None
+    await db.flush()
+    return {"success": True, "id": item.id, "is_invalid": item.is_invalid, "invalid_reason": item.invalid_reason}
+
+
+@crawler_router.post("/items/batch-mark")
+async def batch_mark_crawler_items(
+    payload: dict[str, Any],
+    db: AsyncSession = Depends(get_db),
+    _user: dict = Depends(require_permission("management:crawlers")),
+) -> dict[str, Any]:
+    """批量标记爬虫数据。"""
+    ids = payload.get("ids") or []
+    if not ids or not isinstance(ids, list):
+        raise HTTPException(status_code=400, detail="请提供 ID 列表")
+    is_invalid = bool(payload.get("is_invalid", True))
+    reason = str(payload.get("reason") or "").strip()[:500]
+    stmt = (
+        update(CrawlerItem)
+        .where(CrawlerItem.id.in_(ids))
+        .values(is_invalid=is_invalid, invalid_reason=reason if is_invalid else None)
+    )
+    result = await db.execute(stmt)
+    await db.flush()
+    return {"success": True, "updated_count": result.rowcount, "is_invalid": is_invalid}

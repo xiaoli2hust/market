@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import logging
 import re
 import time
 import uuid
@@ -17,6 +18,8 @@ from datetime import date, datetime, timedelta, timezone
 from html import unescape
 from html.parser import HTMLParser
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -1547,7 +1550,14 @@ async def _get_or_create_conversation(
             await db.execute(select(BotConversation).where(BotConversation.conversation_id == conversation_id))
         ).scalar_one_or_none()
         if existing:
+            # 校验会话归属：不允许跨 Profile 复用会话
+            if existing.profile_key != profile.profile_key:
+                raise ValueError(
+                    f"会话 {conversation_id} 属于其他机器人 ({existing.profile_key})，不能在当前机器人下使用"
+                )
             return existing
+        # conversation_id 已指定但不存在，报错而非静默创建新会话
+        raise ValueError(f"会话 {conversation_id} 不存在，请检查后重试或留空以创建新会话")
     title = re.sub(r"\s+", " ", first_message).strip()[:48] or "对话测试"
     conversation = BotConversation(
         conversation_id=f"BC-{uuid.uuid4().hex[:12]}",
@@ -1609,21 +1619,41 @@ async def _select_skills(
             continue
         if correction.phrase and correction.phrase.lower() in text:
             selected.extend(correction.expected_skills or [])
-    market_context = _has_any(text, ["公安", "政数", "空间", "地图", "大数据", "电力", "运营商", "市场", "行业"])
-    opportunity_context = _has_any(text, ["机会", "跟进", "重点关注", "销售线索", "客户切入", "近期"])
-    if _has_any(text, ["标讯", "招投标", "投标", "采购", "预算", "项目机会"]) or (market_context and opportunity_context):
+    market_context = _has_any(text, ["公安", "政数", "空间", "地图", "大数据", "电力", "运营商", "市场", "行业", "政府", "企业", "医疗", "教育", "交通"])
+    opportunity_context = _has_any(text, ["机会", "跟进", "重点关注", "销售线索", "客户切入", "近期", "客户", "合同"])
+    if _has_any(text, [
+        "标讯", "招投标", "投标", "采购", "预算", "项目机会",
+        "招标", "中标", "发包", "询价", "竞价", "公告", " bidding",
+        "信息化", "数字化", "平台建设", "系统集成",
+    ]) or (market_context and opportunity_context):
         selected.append("market.bidding_search")
-        if _has_any(text, ["分析", "趋势", "分布", "统计", "月", "周", "年", "金额", "机会", "重点关注", "跟进"]):
+        if _has_any(text, ["分析", "趋势", "分布", "统计", "月", "周", "年", "金额", "机会", "重点关注", "跟进", "对比", "排名", "top"]):
             selected.append("market.bidding_analysis")
-    if _has_any(text, ["政策", "市场", "政数", "大数据", "电力", "运营商", "空间", "地图", "行业动态"]):
+    if _has_any(text, [
+        "政策", "市场", "政数", "大数据", "电力", "运营商", "空间", "地图", "行业动态",
+        "法规", "标准", "规范", "通知", "行业分析", "趋势", "解读", "影响",
+    ]):
         selected.append("market.policy_market_tracking")
-    if _has_any(text, ["知识", "资料", "方案", "制度", "文档", "空间数据", "地址", "地图"]):
+    if _has_any(text, [
+        "知识", "资料", "方案", "制度", "文档", "空间数据", "地址", "地图",
+        "查询", "搜索", "查找", "帮助", "有没有", "是什么", "怎么", "如何",
+        "介绍", "说明", "解释",
+    ]):
         selected.append("knowledge.search")
-    if _has_any(text, ["周报", "本周", "上周", "部门", "总结", "归档"]):
+    if _has_any(text, [
+        "周报", "本周", "上周", "部门", "总结", "归档",
+        "日报", "汇报", "工作量", "产出", "完成情况",
+    ]):
         selected.append("report.weekly_archive_summary")
-    if _has_any(text, ["商机", "签单", "回款", "销售", "预测", "跟进"]):
+    if _has_any(text, [
+        "商机", "签单", "回款", "销售", "预测", "跟进",
+        "客户", "合同", "项目", "需求", "报价", "成交",
+    ]):
         selected.append("opportunity.followup_status")
-    if _has_any(text, ["群发", "通知", "发到钉钉", "提醒大家", "提醒所有人"]):
+    if _has_any(text, [
+        "群发", "通知", "发到钉钉", "提醒大家", "提醒所有人",
+        "发送", "推送", "广播", "公告",
+    ]):
         selected.append("dingtalk.broadcast")
     if not selected:
         selected = ["knowledge.search"]
@@ -1680,6 +1710,11 @@ async def _execute_skill(
         evidence = []
         run.status = "error"
         run.error_message = str(exc)[:1000]
+        logger.error(
+            "Skill %s 执行失败 (run=%s, conversation=%s): %s",
+            skill.skill_key, run.run_id, conversation.conversation_id, exc,
+            exc_info=True,
+        )
     finished = datetime.now(timezone.utc)
     run.finished_at = finished
     run.duration_ms = int((finished - started).total_seconds() * 1000)
@@ -1996,34 +2031,44 @@ async def _synthesize_answer(
     if not evidence_records and not any(item["skill_key"] == "dingtalk.broadcast" for item in skill_results):
         risk_flags.append("no_evidence")
     if config.get("api_key"):
-        try:
-            service = await create_runtime_llm_service(db, timeout=45, scene="bot_agent_chat")
-            response = await service.chat(
-                [
-                    {
-                        "role": "system",
-                        "content": (
-                            f"你是{profile.name}。只能基于给定 Skill 输出和证据回答；"
-                            "没有证据时必须说明无法确定；外部发送动作必须提示需要确认。"
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": (
-                            f"用户问题：{message}\n\n"
-                            f"Skill 输出：{_json_compact(skill_results)}\n\n"
-                            f"证据：{_json_compact(evidence_records[:12])}\n\n"
-                            "请用中文给出简洁结论、依据和下一步建议。"
-                        ),
-                    },
-                ],
-                temperature=0.2,
-            )
-            content = ((response.get("choices") or [{}])[0].get("message") or {}).get("content")
-            if content:
-                return {"content": content.strip(), "llm_used": True, "risk_flags": risk_flags}
-        except Exception as exc:  # noqa: BLE001
-            risk_flags.append(f"llm_failed:{str(exc)[:80]}")
+        # 优先使用管理员配置的 system_prompt，兜底使用默认模板
+        system_prompt = (profile.system_prompt or "").strip()
+        if not system_prompt:
+            system_prompt = _default_system_prompt(profile.name or "助手", profile.description or "")
+        messages = [
+            {
+                "role": "system",
+                "content": (
+                    f"{system_prompt}\n"
+                    "只能基于给定 Skill 输出和证据回答；"
+                    "没有证据时必须说明无法确定；外部发送动作必须提示需要确认。"
+                ),
+            },
+            {
+                "role": "user",
+                "content": (
+                    f"用户问题：{message}\n\n"
+                    f"Skill 输出：{_json_compact(skill_results)}\n\n"
+                    f"证据：{_json_compact(evidence_records[:20])}\n\n"
+                    "请用中文给出简洁结论、依据和下一步建议。"
+                ),
+            },
+        ]
+        # LLM 调用带重试：最多 2 次重试，应对临时网络故障
+        last_exc: Exception | None = None
+        for _attempt in range(3):
+            try:
+                service = await create_runtime_llm_service(db, timeout=45, scene="bot_agent_chat")
+                response = await service.chat(messages, temperature=0.2)
+                content = ((response.get("choices") or [{}])[0].get("message") or {}).get("content")
+                if content:
+                    return {"content": content.strip(), "llm_used": True, "risk_flags": risk_flags}
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if _attempt < 2:
+                    await asyncio.sleep(0.5 * (_attempt + 1))
+                continue
+        risk_flags.append(f"llm_failed:{str(last_exc)[:80] if last_exc else 'unknown'}")
     return {
         "content": _fallback_answer(skill_results, evidence_records),
         "llm_used": False,

@@ -36,6 +36,30 @@ from ..models import (
     BotToolCall,
     OperationLog,
 )
+from ..schemas import (
+    BotApprovalRequest,
+    BotChannelAdapterRequest,
+    BotChannelBindingCreateRequest,
+    BotChannelBindingUpdateRequest,
+    BotChatTestRequest,
+    BotCollaborationRequest,
+    BotCompliancePolicyRequest,
+    BotFeedbackRequest,
+    BotHandoffRequest,
+    BotInboundTestRequest,
+    BotInboxUpdateRequest,
+    BotIntentCorrectionRequest,
+    BotKnowledgeSearchRequest,
+    BotKnowledgeSyncRequest,
+    BotKnowledgeTextRequest,
+    BotKnowledgeUpdateRequest,
+    BotProfileRequest,
+    BotReleaseRequest,
+    BotSkillUpdateRequest,
+    BotTaskRequest,
+    BotTestCaseRequest,
+    BroadcastRequest,
+)
 from ..services.bot_runtime import (
     bot_observability_summary,
     create_action_approval,
@@ -115,14 +139,14 @@ async def list_profiles(
 
 @router.post("/profiles")
 async def create_profile(
-    payload: dict[str, Any],
+    payload: BotProfileRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:configure")),
 ) -> dict[str, Any]:
     """创建机器人 Profile。"""
 
     try:
-        return await upsert_bot_profile(db, payload=payload, user=_user)
+        return await upsert_bot_profile(db, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -130,14 +154,14 @@ async def create_profile(
 @router.put("/profiles/{profile_key}")
 async def update_profile(
     profile_key: str,
-    payload: dict[str, Any],
+    payload: BotProfileRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:configure")),
 ) -> dict[str, Any]:
     """更新机器人 Profile 身份、边界和 Skill 绑定。"""
 
     try:
-        return await upsert_bot_profile(db, profile_key=profile_key, payload=payload, user=_user)
+        return await upsert_bot_profile(db, profile_key=profile_key, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -161,7 +185,7 @@ async def list_skills(
 @router.put("/skills/{skill_key}")
 async def update_skill(
     skill_key: str,
-    payload: dict[str, Any],
+    payload: BotSkillUpdateRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:configure")),
 ) -> dict[str, Any]:
@@ -173,20 +197,21 @@ async def update_skill(
     ).scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="Skill 不存在")
-    if "enabled" in payload:
-        row.enabled = bool(payload["enabled"])
-    if "config" in payload:
-        if payload["config"] is not None and not isinstance(payload["config"], dict):
+    data = payload.model_dump(exclude_unset=True)
+    if "enabled" in data:
+        row.enabled = bool(data["enabled"])
+    if "config" in data:
+        if data["config"] is not None and not isinstance(data["config"], dict):
             raise HTTPException(status_code=400, detail="Skill 配置格式不正确")
-        row.config = payload["config"] or {}
-    if "trigger_scenarios" in payload and isinstance(payload["trigger_scenarios"], list):
-        row.trigger_scenarios = [str(item).strip()[:120] for item in payload["trigger_scenarios"] if str(item).strip()][:20]
-    if "evidence_rules" in payload and isinstance(payload["evidence_rules"], dict):
-        row.evidence_rules = payload["evidence_rules"]
-    if "input_contract" in payload and isinstance(payload["input_contract"], dict):
-        row.input_contract = payload["input_contract"]
-    if "output_contract" in payload and isinstance(payload["output_contract"], dict):
-        row.output_contract = payload["output_contract"]
+        row.config = data["config"] or {}
+    if "trigger_scenarios" in data and isinstance(data["trigger_scenarios"], list):
+        row.trigger_scenarios = [str(item).strip()[:120] for item in data["trigger_scenarios"] if str(item).strip()][:20]
+    if "evidence_rules" in data and isinstance(data["evidence_rules"], dict):
+        row.evidence_rules = data["evidence_rules"]
+    if "input_contract" in data and isinstance(data["input_contract"], dict):
+        row.input_contract = data["input_contract"]
+    if "output_contract" in data and isinstance(data["output_contract"], dict):
+        row.output_contract = data["output_contract"]
     _log_operation(db, _user, "bot_skill_update", skill_key, f"enabled={row.enabled}")
     await db.flush()
     await db.refresh(row)
@@ -195,7 +220,7 @@ async def update_skill(
 
 @router.post("/chat/test")
 async def chat_test(
-    payload: dict[str, Any],
+    payload: BotChatTestRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:view")),
 ) -> dict[str, Any]:
@@ -204,10 +229,10 @@ async def chat_test(
     try:
         return await run_agent_chat(
             db,
-            profile_key=str(payload.get("profile_key") or "management_assistant_agent"),
-            conversation_id=payload.get("conversation_id"),
-            simulated_user_role=payload.get("simulated_user_role"),
-            message=str(payload.get("message") or ""),
+            profile_key=str(payload.profile_key or "management_assistant_agent"),
+            conversation_id=payload.conversation_id,
+            simulated_user_role=payload.simulated_user_role,
+            message=str(payload.message or ""),
             user=_user,
         )
     except ValueError as exc:
@@ -319,7 +344,7 @@ async def list_knowledge_files(
 
 @router.post("/knowledge/text")
 async def create_knowledge_text(
-    payload: dict[str, Any],
+    payload: BotKnowledgeTextRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:knowledge")),
 ) -> dict[str, Any]:
@@ -328,15 +353,15 @@ async def create_knowledge_text(
     try:
         return await upload_knowledge_text(
             db,
-            title=str(payload.get("title") or ""),
-            text_content=str(payload.get("text_content") or ""),
-            category=str(payload.get("category") or "general"),
+            title=str(payload.title or ""),
+            text_content=str(payload.text_content or ""),
+            category=str(payload.category or "general"),
             user=_user,
             source_type="manual_text",
-            owner_profile_key=payload.get("owner_profile_key"),
-            visibility_scope=str(payload.get("visibility_scope") or "all_bots"),
-            tags=payload.get("tags") if isinstance(payload.get("tags"), list) else [],
-            review_status=str(payload.get("review_status") or "approved"),
+            owner_profile_key=payload.owner_profile_key,
+            visibility_scope=str(payload.visibility_scope or "all_bots"),
+            tags=payload.tags if isinstance(payload.tags, list) else [],
+            review_status=str(payload.review_status or "approved"),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -382,27 +407,27 @@ async def upload_knowledge_file(
 @router.put("/knowledge/files/{file_id}")
 async def update_knowledge_file(
     file_id: str,
-    payload: dict[str, Any],
+    payload: BotKnowledgeUpdateRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:knowledge")),
 ) -> dict[str, Any]:
     """更新知识生命周期状态、可见范围和标签。"""
 
     try:
-        return await update_knowledge_metadata(db, file_id=file_id, payload=payload, user=_user)
+        return await update_knowledge_metadata(db, file_id=file_id, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=404 if "不存在" in str(exc) else 400, detail=str(exc)) from exc
 
 
 @router.post("/knowledge/search")
 async def search_knowledge(
-    payload: dict[str, Any],
+    payload: BotKnowledgeSearchRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:view")),
 ) -> dict[str, Any]:
     """测试知识检索。"""
 
-    query = str(payload.get("query") or "").strip()
+    query = str(payload.query or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="检索问题不能为空")
     result = await run_agent_chat(
@@ -424,7 +449,7 @@ async def search_knowledge(
 
 @router.post("/inbound/test")
 async def inbound_test(
-    payload: dict[str, Any],
+    payload: BotInboundTestRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:view")),
 ) -> dict[str, Any]:
@@ -433,10 +458,10 @@ async def inbound_test(
     try:
         return await handle_inbound_message(
             db,
-            channel_key=str(payload.get("channel_key") or "dingtalk_default"),
-            content=str(payload.get("content") or ""),
-            sender_id=str(payload.get("sender_id") or _user_id(_user) or "local_tester"),
-            sender_name=str(payload.get("sender_name") or _user_name(_user)),
+            channel_key=str(payload.channel_key or "dingtalk_default"),
+            content=str(payload.content or ""),
+            sender_id=str(payload.sender_id or _user_id(_user) or "local_tester"),
+            sender_name=str(payload.sender_name or _user_name(_user)),
             raw_payload={"source": "manual_inbound_test"},
         )
     except ValueError as exc:
@@ -455,14 +480,14 @@ async def channel_adapters(
 
 @router.post("/channel-adapters")
 async def save_channel_adapter(
-    payload: dict[str, Any],
+    payload: BotChannelAdapterRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:configure")),
 ) -> dict[str, Any]:
     """新增或更新渠道适配器、认证和限流策略。"""
 
     try:
-        return await upsert_channel_adapter(db, payload=payload, user=_user)
+        return await upsert_channel_adapter(db, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -483,14 +508,14 @@ async def list_channel_bindings(
 
 @router.post("/channel-bindings")
 async def create_channel_binding(
-    payload: dict[str, Any],
+    payload: BotChannelBindingCreateRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:configure")),
 ) -> dict[str, Any]:
     """新增外部群聊与机器人绑定。"""
 
     await ensure_bot_runtime_defaults(db)
-    channel_key = str(payload.get("channel_key") or "").strip()
+    channel_key = str(payload.channel_key or "").strip()
     if not channel_key:
         channel_key = f"channel_{uuid.uuid4().hex[:8]}"
     if (
@@ -499,12 +524,12 @@ async def create_channel_binding(
         raise HTTPException(status_code=400, detail="群聊标识已存在")
     row = BotChannelBinding(
         channel_key=channel_key[:100],
-        channel_type=str(payload.get("channel_type") or "dingtalk")[:30],
-        channel_name=str(payload.get("channel_name") or "未命名群聊")[:120],
-        bot_profile_key=str(payload.get("bot_profile_key") or "management_assistant_agent")[:80],
-        external_id=str(payload.get("external_id") or "")[:255] or None,
-        binding_config=payload.get("binding_config") if isinstance(payload.get("binding_config"), dict) else {},
-        status=str(payload.get("status") or "active")[:20],
+        channel_type=str(payload.channel_type or "dingtalk")[:30],
+        channel_name=str(payload.channel_name or "未命名群聊")[:120],
+        bot_profile_key=str(payload.bot_profile_key or "management_assistant_agent")[:80],
+        external_id=str(payload.external_id or "")[:255] or None,
+        binding_config=payload.binding_config if isinstance(payload.binding_config, dict) else {},
+        status=str(payload.status or "active")[:20],
     )
     db.add(row)
     _log_operation(db, _user, "bot_channel_binding_create", row.channel_key, row.channel_name)
@@ -516,7 +541,7 @@ async def create_channel_binding(
 @router.put("/channel-bindings/{channel_key}")
 async def update_channel_binding(
     channel_key: str,
-    payload: dict[str, Any],
+    payload: BotChannelBindingUpdateRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:configure")),
 ) -> dict[str, Any]:
@@ -527,12 +552,13 @@ async def update_channel_binding(
     ).scalar_one_or_none()
     if not row:
         raise HTTPException(status_code=404, detail="群聊绑定不存在")
+    data = payload.model_dump(exclude_unset=True)
     for field, limit in {"channel_name": 120, "channel_type": 30, "bot_profile_key": 80, "external_id": 255, "status": 20}.items():
-        if field in payload:
-            value = str(payload.get(field) or "").strip()
+        if field in data:
+            value = str(data.get(field) or "").strip()
             setattr(row, field, value[:limit] if value else None if field == "external_id" else getattr(row, field))
-    if "binding_config" in payload and isinstance(payload["binding_config"], dict):
-        row.binding_config = payload["binding_config"]
+    if "binding_config" in data and isinstance(data["binding_config"], dict):
+        row.binding_config = data["binding_config"]
     row.updated_at = datetime.now(timezone.utc)
     _log_operation(db, _user, "bot_channel_binding_update", row.channel_key, row.status)
     await db.flush()
@@ -554,14 +580,14 @@ async def bot_inbox(
 @router.put("/inbox/{inbox_id}")
 async def save_inbox_item(
     inbox_id: str,
-    payload: dict[str, Any],
+    payload: BotInboxUpdateRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:approve")),
 ) -> dict[str, Any]:
     """更新收件箱状态、负责人、优先级或处理结论。"""
 
     try:
-        return await update_inbox_item(db, inbox_id=inbox_id, payload=payload, user=_user)
+        return await update_inbox_item(db, inbox_id=inbox_id, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=404 if "不存在" in str(exc) else 400, detail=str(exc)) from exc
 
@@ -569,14 +595,14 @@ async def save_inbox_item(
 @router.post("/inbox/{inbox_id}/handoff")
 async def handoff_inbox_item(
     inbox_id: str,
-    payload: dict[str, Any],
+    payload: BotHandoffRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:approve")),
 ) -> dict[str, Any]:
     """把机器人无法直接闭环的事项转给人工负责人。"""
 
     try:
-        return await create_handoff(db, inbox_id=inbox_id, payload=payload, user=_user)
+        return await create_handoff(db, inbox_id=inbox_id, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=404 if "不存在" in str(exc) else 400, detail=str(exc)) from exc
 
@@ -659,12 +685,12 @@ async def list_tasks(
 
 @router.post("/tasks")
 async def create_task(
-    payload: dict[str, Any],
+    payload: BotTaskRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:configure")),
 ) -> dict[str, Any]:
     try:
-        return await create_bot_task(db, payload=payload, user=_user)
+        return await create_bot_task(db, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -718,12 +744,12 @@ async def list_approvals(
 
 @router.post("/approvals")
 async def create_approval(
-    payload: dict[str, Any],
+    payload: BotApprovalRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:approve")),
 ) -> dict[str, Any]:
     try:
-        return await create_action_approval(db, payload=payload, user=_user)
+        return await create_action_approval(db, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -767,12 +793,12 @@ async def list_test_cases(
 
 @router.post("/test-cases")
 async def create_case(
-    payload: dict[str, Any],
+    payload: BotTestCaseRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:evaluate")),
 ) -> dict[str, Any]:
     try:
-        return await create_test_case(db, payload=payload, user=_user)
+        return await create_test_case(db, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -821,12 +847,12 @@ async def list_intent_corrections(
 
 @router.post("/intent-corrections")
 async def create_correction(
-    payload: dict[str, Any],
+    payload: BotIntentCorrectionRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:evaluate")),
 ) -> dict[str, Any]:
     try:
-        return await create_intent_correction(db, payload=payload, user=_user)
+        return await create_intent_correction(db, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -852,12 +878,12 @@ async def list_collaborations(
 
 @router.post("/collaborations/run")
 async def create_collaboration(
-    payload: dict[str, Any],
+    payload: BotCollaborationRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:evaluate")),
 ) -> dict[str, Any]:
     try:
-        return await run_collaboration(db, payload=payload, user=_user)
+        return await run_collaboration(db, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -875,14 +901,14 @@ async def bot_releases(
 
 @router.post("/releases")
 async def create_release(
-    payload: dict[str, Any],
+    payload: BotReleaseRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:configure")),
 ) -> dict[str, Any]:
     """把当前机器人配置快照保存为待发布版本。"""
 
     try:
-        return await create_release_version(db, payload=payload, user=_user)
+        return await create_release_version(db, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -929,14 +955,14 @@ async def bot_feedback(
 
 @router.post("/feedback")
 async def save_feedback(
-    payload: dict[str, Any],
+    payload: BotFeedbackRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:evaluate")),
 ) -> dict[str, Any]:
     """记录一次机器人回答反馈。"""
 
     try:
-        return await create_feedback(db, payload=payload, user=_user)
+        return await create_feedback(db, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -953,14 +979,14 @@ async def knowledge_sync_jobs(
 
 @router.post("/knowledge-sync")
 async def create_knowledge_sync(
-    payload: dict[str, Any],
+    payload: BotKnowledgeSyncRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:knowledge")),
 ) -> dict[str, Any]:
     """创建知识同步任务。"""
 
     try:
-        return await create_knowledge_sync_job(db, payload=payload, user=_user)
+        return await create_knowledge_sync_job(db, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1001,14 +1027,14 @@ async def compliance_policies(
 
 @router.post("/compliance-policies")
 async def save_compliance_policy(
-    payload: dict[str, Any],
+    payload: BotCompliancePolicyRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:configure")),
 ) -> dict[str, Any]:
     """新增或更新机器人合规策略。"""
 
     try:
-        return await upsert_compliance_policy(db, payload=payload, user=_user)
+        return await upsert_compliance_policy(db, payload=payload.model_dump(exclude_unset=True), user=_user)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -1076,7 +1102,7 @@ async def list_broadcasts(
 
 @router.post("/broadcasts")
 async def create_broadcast(
-    payload: dict[str, Any],
+    payload: BroadcastRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:broadcast")),
 ) -> dict[str, Any]:
@@ -1092,7 +1118,7 @@ async def create_broadcast(
 
 @router.post("/broadcasts/send")
 async def create_and_send_broadcast(
-    payload: dict[str, Any],
+    payload: BroadcastRequest,
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("bot:broadcast")),
 ) -> dict[str, Any]:
@@ -1123,9 +1149,9 @@ async def send_existing_broadcast(
     return await _send_broadcast(db, record, _user)
 
 
-def _build_broadcast(payload: dict[str, Any], user: dict[str, Any]) -> BotBroadcast:
-    title = str(payload.get("title") or "").strip()
-    content = str(payload.get("content") or "").strip()
+def _build_broadcast(payload: BroadcastRequest, user: dict[str, Any]) -> BotBroadcast:
+    title = str(payload.title or "").strip()
+    content = str(payload.content or "").strip()
     if not title:
         raise HTTPException(status_code=400, detail="消息标题不能为空")
     if len(title) > _MAX_TITLE_LENGTH:
@@ -1135,15 +1161,15 @@ def _build_broadcast(payload: dict[str, Any], user: dict[str, Any]) -> BotBroadc
     if len(content) > _MAX_CONTENT_LENGTH:
         raise HTTPException(status_code=400, detail=f"消息正文不能超过{_MAX_CONTENT_LENGTH}字")
 
-    message_type = str(payload.get("message_type") or "markdown").strip().lower()
+    message_type = str(payload.message_type or "markdown").strip().lower()
     if message_type not in _MESSAGE_TYPES:
         raise HTTPException(status_code=400, detail="消息类型不支持")
 
-    target_type = str(payload.get("target_type") or _TARGET_TYPE).strip()
+    target_type = str(payload.target_type or _TARGET_TYPE).strip()
     if target_type != _TARGET_TYPE:
         raise HTTPException(status_code=400, detail="当前版本仅支持发送到管理中心配置的钉钉默认群")
 
-    target_payload = payload.get("target_payload")
+    target_payload = payload.target_payload
     if target_payload is not None and not isinstance(target_payload, dict):
         raise HTTPException(status_code=400, detail="目标配置格式不正确")
 
@@ -1154,7 +1180,7 @@ def _build_broadcast(payload: dict[str, Any], user: dict[str, Any]) -> BotBroadc
         target_type=_TARGET_TYPE,
         target_summary=_TARGET_SUMMARY,
         target_payload=target_payload or {},
-        at_all=bool(payload.get("at_all")),
+        at_all=bool(payload.at_all),
         status="draft",
         created_by=_user_id(user),
         created_by_name=_user_name(user),
