@@ -1342,6 +1342,28 @@ class DingtalkConfig(Base):
     )
 
 
+class AipaasConfig(Base):
+    """AIPAAS 日报同步配置。"""
+
+    __tablename__ = "aipaas_configs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    base_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    app_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    sync_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false", default=False
+    )
+    sync_interval_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="60", default=60
+    )
+    sync_users: Mapped[list] = mapped_column(JSON, nullable=False, default=list)
+    last_sync_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_sync_result: Mapped[Optional[dict]] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 __all__ = [
     "Base",
     "Staff",
@@ -1393,4 +1415,5 @@ __all__ = [
     "BotCompliancePolicy",
     "APIKeyRecord",
     "DingtalkConfig",
+    "AipaasConfig",
 ]

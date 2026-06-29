@@ -109,6 +109,28 @@ def check_dingtalk_identity_contract() -> None:
     assert "不是旧 AgentId" in frontend, "前端必须提醒 AgentId 不等同于 RobotCode"
 
 
+def check_aipaas_sync_contract() -> None:
+    model = _read("backend/app/models.py")
+    service = _read("backend/app/services/aipaas_service.py")
+    router = _read("backend/app/routers/aipaas_sync.py")
+    scheduler = _read("backend/app/services/crawler_scheduler.py")
+    frontend = _read("frontend/src/pages/Management/index.tsx")
+    api = _read("frontend/src/services/api.ts")
+    migration = _read("backend/migrations/versions/016_aipaas_config_and_crawler_item_flags.py")
+
+    assert "AipaasConfig" in model, "AIPAAS 配置模型缺少 AipaasConfig"
+    for marker in ("sync_users", "last_sync_result"):
+        assert marker in model, f"AIPAAS 配置模型缺少 {marker}"
+        assert marker in migration, f"AIPAAS 迁移缺少 {marker}"
+    assert "aipaas_configs" in migration, "AIPAAS 迁移必须创建配置表"
+    assert "get_runtime_aipaas_config(db)" in service, "AIPAAS 服务必须优先读取管理中心配置"
+    assert "upsert_runtime_aipaas_config" in router, "AIPAAS 配置必须持久化保存"
+    assert "normalize_aipaas_users" in service, "AIPAAS 人员清单必须清洗去重"
+    assert "pull_aipaas_daily_reports(db)" in scheduler, "AIPAAS 调度器必须真实执行同步"
+    assert "日报同步源" in frontend and "triggerAipaasSync" in frontend, "管理中心必须提供 AIPAAS 配置和手动同步入口"
+    assert "timeout: LONG_TASK_TIMEOUT_MS" in api, "AIPAAS 手动同步必须使用长任务超时"
+
+
 def check_browser_session_cookie_contract() -> None:
     auth_router = _read("backend/app/routers/auth.py")
     auth_dep = _read("backend/app/auth.py")
@@ -490,6 +512,15 @@ def check_crawler_strategy_contract() -> None:
     assert "check_all_sources_have_executable_rules" in coverage, "验收脚本必须阻止无采集规则的来源进入源池"
 
 
+def check_crawler_item_archive_contract() -> None:
+    crawler_router = _read("backend/app/routers/crawler.py")
+    assert "@crawler_router.delete(\"/items/{item_id}\")" in crawler_router, "爬虫数据管理必须保留兼容归档入口"
+    assert "item.is_invalid = True" in crawler_router, "单条爬虫数据删除入口必须改为归档"
+    assert ".values(is_invalid=True" in crawler_router, "批量爬虫数据删除入口必须改为归档"
+    assert "db.delete(item)" not in crawler_router, "爬虫数据不能物理删除，否则会破坏证据链"
+    assert "delete(CrawlerItem)" not in crawler_router, "爬虫数据不能批量物理删除"
+
+
 def check_api_error_message_contract() -> None:
     for path in (
         "backend/app/routers/reports.py",
@@ -521,6 +552,8 @@ def check_frontend_management_tone() -> None:
         text = _read(path)
         for marker in ("✅", "⚠️"):
             assert marker not in text, f"{path} 不应使用临时符号化提示：{marker}"
+        for marker in ("后续接", "待接入", "未实现"):
+            assert marker not in text, f"{path} 不应向管理者展示内部建设口径：{marker}"
     express_router = _read("backend/app/routers/express.py")
     assert "长图截图已保存" not in express_router, "钉钉推送不能暴露服务器本地截图路径"
 
@@ -711,6 +744,7 @@ def check_public_deployment_toolkit_contract() -> None:
     update = _read("deploy/update.sh")
     marketctl = _read("deploy/marketctl.sh")
     prod_env = _read("deploy/env.production.example")
+    smoke = _read("backend/scripts/deployment_smoke.py")
     frontend_dockerignore = _read("frontend/.dockerignore")
     gate = _read("backend/scripts/security_quality_gate.py")
 
@@ -723,9 +757,12 @@ def check_public_deployment_toolkit_contract() -> None:
     assert "internal: true" in prod_compose, "生产部署必须使用 Docker internal 网络隔离后端与数据库"
     assert "AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}" in prod_compose, "生产部署必须默认 Secure Cookie"
     assert "Strict-Transport-Security" in caddyfile and "reverse_proxy frontend:80" in caddyfile, "公网网关必须有 TLS 安全头和前端代理"
-    for command in ("init", "gate", "up", "update", "backup", "restore", "pack"):
+    for command in ("init", "doctor", "gate", "up", "smoke", "update", "backup", "restore", "pack"):
         assert f"{command})" in marketctl or f"cmd_{command}" in marketctl, f"部署工具缺少 {command} 命令"
+    assert "seed-snapshot)" in marketctl and "cmd_seed_snapshot" in marketctl, "部署工具必须提供快照导入命令"
     assert "cmd_backup" in marketctl and "compose up -d --build --remove-orphans" in marketctl, "更新必须先备份再一键替换"
+    assert "cmd_smoke" in marketctl and "deployment_smoke.py" in marketctl, "部署工具必须提供上线冒烟"
+    assert "宿主机未安装 npm" in marketctl, "服务器部署不能强依赖宿主机 Node.js"
     for excluded in (
         "frontend/src/.umi",
         "frontend/src/.umi-production",
@@ -744,9 +781,11 @@ def check_public_deployment_toolkit_contract() -> None:
     assert "SECURITY GATE PASSED" in gate and "真实公网域名" in gate and "AUTH_COOKIE_SECURE=true" in gate, "安全门禁必须检查公网域名与 Cookie 策略"
     assert "--domain" in marketctl and "--email" in marketctl and "security_quality_gate.py" in marketctl, "初始化 .env 必须要求域名邮箱并自动跑门禁"
     assert 'deploy/install.sh" "$@"' in root_install, "根目录必须提供小白一键部署入口"
-    for marker in ("docker compose version", "marketctl.sh", "init --domain", "up", "ADMIN_PASSWORD"):
+    for marker in ("docker compose version", "marketctl.sh", "doctor", "init --domain", "up", "seed-snapshot", "smoke", "ADMIN_PASSWORD"):
         assert marker in install, f"一键部署脚本缺少关键步骤：{marker}"
     assert 'marketctl.sh" update' in update and "自动备份数据库" in update, "一键更新脚本必须调用受控更新流程"
+    for marker in ("/api/ready", "/api/auth/login", "/api/settings/system", "/api/crawlers/status", "/api/aipaas-sync/config"):
+        assert marker in smoke, f"上线冒烟脚本缺少核心接口检查：{marker}"
 
     with tempfile.NamedTemporaryFile("w", delete=False) as ok_env:
         ok_path = Path(ok_env.name)
@@ -817,7 +856,7 @@ def check_database_migration_contract() -> None:
     )
     assert rendered.returncode == 0, rendered.stderr
     assert "CREATE TABLE codex_schema_check.staff" in rendered.stdout, "PostgreSQL 迁移 SQL 必须使用配置 schema"
-    assert "010_dingtalk_app_identity_fields" in rendered.stdout, "PostgreSQL 迁移 SQL 必须覆盖最新迁移"
+    assert "016_aipaas_config_and_crawler_item_flags" in rendered.stdout, "PostgreSQL 迁移 SQL 必须覆盖最新迁移"
 
 
 def check_ci_contract() -> None:
@@ -901,6 +940,7 @@ def main() -> int:
         ("运行时密钥加密契约", check_secret_store_contract),
         ("Webhook 加密存储", check_webhook_url_is_encrypted),
         ("钉钉应用身份契约", check_dingtalk_identity_contract),
+        ("AIPAAS 同步闭环", check_aipaas_sync_contract),
         ("浏览器会话 Cookie 契约", check_browser_session_cookie_contract),
         ("登录失败限流契约", check_login_rate_limit_contract),
         ("依赖可复现契约", check_dependency_reproducibility_contract),
@@ -916,6 +956,7 @@ def main() -> int:
         ("干净 SQLite 启动", check_clean_sqlite_bootstrap),
         ("采集失败原因可见", check_crawler_failure_message_contract),
         ("爬虫策略分级契约", check_crawler_strategy_contract),
+        ("爬虫数据归档契约", check_crawler_item_archive_contract),
         ("接口错误信息收敛", check_api_error_message_contract),
         ("前端管理语气", check_frontend_management_tone),
         ("前端权限入口", check_frontend_permission_gates),

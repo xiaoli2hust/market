@@ -55,9 +55,9 @@ def check_bidding_express_period() -> None:
 
     service.fetch_bidding_data = fake_fetch
     try:
-        week = service.build_express("demo", "2026-06-23", period="week")
-        month = service.build_express("demo", "2026-06-23", period="month")
-        all_time = service.build_express("demo", "2026-06-23", period="all")
+        week = service.build_express("acceptance", "2026-06-23", period="week")
+        month = service.build_express("acceptance", "2026-06-23", period="month")
+        all_time = service.build_express("acceptance", "2026-06-23", period="all")
     finally:
         service.fetch_bidding_data = original_fetch
 

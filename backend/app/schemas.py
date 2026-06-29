@@ -142,6 +142,8 @@ class CrawlerItemOut(APIBaseModel):
     matched_keywords: list[str] | None = None
     extra_data: dict[str, Any] | None = None
     is_pushed: bool
+    is_invalid: bool = False
+    invalid_reason: str | None = None
     created_at: datetime
 
 

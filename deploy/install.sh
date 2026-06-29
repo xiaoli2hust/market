@@ -17,6 +17,7 @@ Market 数据采集中心一键部署
   --domain 域名     公网访问域名，例如 market.company.com
   --email 邮箱      HTTPS 证书通知邮箱
   --force           重新生成 .env，旧 .env 会自动备份
+  --no-seed         不导入内置采集配置和市场数据快照
   -h, --help        查看帮助
 USAGE
 }
@@ -24,6 +25,7 @@ USAGE
 domain="${MARKET_DOMAIN:-}"
 email="${ACME_EMAIL:-}"
 force="false"
+seed_snapshot="true"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -37,6 +39,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --force)
       force="true"
+      shift
+      ;;
+    --no-seed)
+      seed_snapshot="false"
       shift
       ;;
     -h|--help)
@@ -81,6 +87,8 @@ fi
 echo "开始一键部署 Market 数据采集中心。"
 echo "部署域名: $domain"
 
+"$ROOT/deploy/marketctl.sh" doctor
+
 init_args=(init --domain "$domain" --email "$email")
 if [[ "$force" == "true" ]]; then
   init_args+=(--force)
@@ -88,6 +96,10 @@ fi
 
 "$ROOT/deploy/marketctl.sh" "${init_args[@]}"
 "$ROOT/deploy/marketctl.sh" up
+if [[ "$seed_snapshot" == "true" ]]; then
+  "$ROOT/deploy/marketctl.sh" seed-snapshot
+  "$ROOT/deploy/marketctl.sh" smoke
+fi
 
 cat <<EOF
 
@@ -101,7 +113,7 @@ cat <<EOF
   密码: 查看服务器项目目录 .env 文件里的 ADMIN_PASSWORD
 
 以后更新新版本:
-  bash deploy/update.sh
+  ./deploy/marketctl.sh update
 
 查看运行状态:
   ./deploy/marketctl.sh status

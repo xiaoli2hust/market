@@ -101,6 +101,8 @@ bash install.sh
 - 公网域名，例如 `market.company.com`
 - HTTPS 证书通知邮箱，例如 `ops@company.com`
 
+脚本会自动完成服务器自检、强密钥生成、安全与质量门禁、容器构建启动、内置采集快照导入和上线冒烟验证。
+
 如果你已经准备好域名和邮箱，也可以一次执行：
 
 ```bash
@@ -116,7 +118,7 @@ https://你的域名
 后续你把新代码覆盖到服务器项目目录后，只需要执行：
 
 ```bash
-bash deploy/update.sh
+./deploy/marketctl.sh update
 ```
 
 更新会自动备份数据库、运行安全与质量门禁，通过后再替换服务。
@@ -127,6 +129,7 @@ bash deploy/update.sh
 - 域名已经解析到这台服务器。
 - 防火墙或安全组开放 `80` 和 `443`。
 - 服务器安装 Docker 和 Docker Compose 插件。
+- 不需要在服务器额外安装 Node.js 或项目 Python 依赖；前后端构建在 Docker 里完成。
 
 生产部署只暴露公网 `80/443`，数据库和后端端口不会直接暴露到服务器外部。
 
@@ -146,9 +149,10 @@ bash deploy/update.sh
 - 自动写入公网域名、证书邮箱和 CORS 允许来源。
 - 自动执行公网安全门禁；示例域名、IP、localhost 和弱密钥会被拒绝。
 
-上线前先跑门禁：
+上线前先跑服务器自检和门禁：
 
 ```bash
+./deploy/marketctl.sh doctor
 ./deploy/marketctl.sh gate
 ```
 
@@ -156,6 +160,12 @@ bash deploy/update.sh
 
 ```bash
 ./deploy/marketctl.sh up
+```
+
+验证服务是否可用：
+
+```bash
+./deploy/marketctl.sh smoke
 ```
 
 导入仓库内置的脱敏采集配置和已抓取市场数据：

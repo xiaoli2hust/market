@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -14,9 +14,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..auth import require_permission
-from ..config import settings
 from ..database import get_db
-from ..services.aipaas_service import pull_aipaas_daily_reports
+from ..services.aipaas_service import (
+    get_runtime_aipaas_config,
+    normalize_aipaas_users,
+    pull_aipaas_daily_reports,
+    upsert_runtime_aipaas_config,
+)
+from ..validation import validate_http_url
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +48,7 @@ class AipaasConfigUpdateRequest(BaseModel):
     app_id: str | None = None
     sync_enabled: bool | None = None
     sync_interval_minutes: int | None = None
+    sync_users: list[AipaasUserItem] | None = None
 
 
 # ---------- 接口 ----------
@@ -50,32 +56,37 @@ class AipaasConfigUpdateRequest(BaseModel):
 
 @router.get("/config")
 async def get_config(
+    db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("management:settings")),
 ) -> dict[str, Any]:
     """查看 AIPAAS 同步配置。"""
-    return {
-        "base_url": settings.AIPAAS_BASE_URL,
-        "app_id": settings.AIPAAS_APP_ID,
-        "sync_enabled": settings.AIPAAS_SYNC_ENABLED,
-        "sync_interval_minutes": settings.AIPAAS_SYNC_INTERVAL_MINUTES,
-    }
+    config = await get_runtime_aipaas_config(db)
+    return _public_config(config)
 
 
 @router.put("/config")
 async def update_config(
     payload: AipaasConfigUpdateRequest,
+    db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("management:settings")),
 ) -> dict[str, Any]:
-    """更新 AIPAAS 同步配置（运行时生效，重启后需 .env 持久化）。"""
+    """更新 AIPAAS 同步配置。"""
+    update_payload: dict[str, Any] = {}
     if payload.base_url is not None:
-        settings.AIPAAS_BASE_URL = payload.base_url.strip()
+        update_payload["base_url"] = validate_http_url(payload.base_url, "AIPAAS 地址", allow_empty=True)
     if payload.app_id is not None:
-        settings.AIPAAS_APP_ID = payload.app_id.strip()
+        update_payload["app_id"] = payload.app_id.strip()
     if payload.sync_enabled is not None:
-        settings.AIPAAS_SYNC_ENABLED = payload.sync_enabled
+        update_payload["sync_enabled"] = payload.sync_enabled
     if payload.sync_interval_minutes is not None:
-        settings.AIPAAS_SYNC_INTERVAL_MINUTES = max(10, payload.sync_interval_minutes)
-    return await get_config(_user=_user)
+        update_payload["sync_interval_minutes"] = max(10, payload.sync_interval_minutes)
+    if payload.sync_users is not None:
+        update_payload["sync_users"] = [
+            {"user_id": item.user_id, "user_name": item.user_name}
+            for item in payload.sync_users
+        ]
+    config = await upsert_runtime_aipaas_config(db, update_payload)
+    return _public_config(config)
 
 
 @router.post("/trigger")
@@ -85,10 +96,11 @@ async def trigger_sync(
     _user: dict = Depends(require_permission("management:settings")),
 ) -> dict[str, Any]:
     """手动触发一次 AIPAAS 日报拉取。"""
-    if not settings.AIPAAS_BASE_URL:
-        raise HTTPException(status_code=400, detail="AIPAAS_BASE_URL 未配置，请先在管理中心设置")
-    if not settings.AIPAAS_APP_ID:
-        raise HTTPException(status_code=400, detail="AIPAAS_APP_ID 未配置")
+    config = await get_runtime_aipaas_config(db)
+    if not config.get("base_url"):
+        raise HTTPException(status_code=400, detail="AIPAAS 地址未配置，请先在管理中心设置")
+    if not config.get("app_id"):
+        raise HTTPException(status_code=400, detail="AIPAAS App ID 未配置")
 
     target_date = None
     if payload.date:
@@ -97,7 +109,9 @@ async def trigger_sync(
         except ValueError:
             raise HTTPException(status_code=400, detail="日期格式不正确，请使用 YYYY-MM-DD")
 
-    user_list = [{"user_id": u.user_id, "user_name": u.user_name} for u in payload.users]
+    user_list = normalize_aipaas_users(
+        [{"user_id": u.user_id, "user_name": u.user_name} for u in payload.users]
+    )
 
     result = await pull_aipaas_daily_reports(
         db,
@@ -109,13 +123,25 @@ async def trigger_sync(
 
 @router.get("/status")
 async def sync_status(
+    db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("management:settings")),
 ) -> dict[str, Any]:
     """同步状态检查。"""
+    config = await get_runtime_aipaas_config(db)
     return {
-        "configured": bool(settings.AIPAAS_BASE_URL and settings.AIPAAS_APP_ID),
-        "enabled": settings.AIPAAS_SYNC_ENABLED,
-        "interval_minutes": settings.AIPAAS_SYNC_INTERVAL_MINUTES,
-        "base_url": settings.AIPAAS_BASE_URL or "(未配置)",
-        "app_id": settings.AIPAAS_APP_ID or "(未配置)",
+        **_public_config(config),
+        "configured": bool(config.get("base_url") and config.get("app_id")),
+    }
+
+
+def _public_config(config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "base_url": config.get("base_url") or "",
+        "app_id": config.get("app_id") or "",
+        "sync_enabled": bool(config.get("sync_enabled")),
+        "sync_interval_minutes": int(config.get("sync_interval_minutes") or 60),
+        "sync_users": normalize_aipaas_users(config.get("sync_users") or []),
+        "last_sync_at": config.get("last_sync_at").isoformat() if config.get("last_sync_at") else None,
+        "last_sync_result": config.get("last_sync_result"),
+        "source": config.get("source") or "management",
     }

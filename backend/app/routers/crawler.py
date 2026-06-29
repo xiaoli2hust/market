@@ -21,7 +21,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -648,13 +648,15 @@ async def _finish_crawler_task_run(
 def _visible_intelligence_condition(threshold: float = 30):
     """业务页面只展示经过相关性过滤的标讯雷达数据。"""
 
-    return (CrawlerItem.category != "bidding") | (CrawlerItem.relevance_score >= threshold)
+    return CrawlerItem.is_invalid.is_(False) & (
+        (CrawlerItem.category != "bidding") | (CrawlerItem.relevance_score >= threshold)
+    )
 
 
 def _effective_item_condition(category: str, threshold: float = 30):
     if category == "bidding":
-        return CrawlerItem.relevance_score >= threshold
-    return None
+        return CrawlerItem.is_invalid.is_(False) & (CrawlerItem.relevance_score >= threshold)
+    return CrawlerItem.is_invalid.is_(False)
 
 
 async def _count_crawler_items(db: AsyncSession, category: str, condition: Any = None) -> int:
@@ -1825,7 +1827,7 @@ def _crawler_item_to_dict(item: CrawlerItem) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# 爬虫数据管理：删除 & 标记
+# 爬虫数据管理：归档 & 标记
 # ---------------------------------------------------------------------------
 
 
@@ -1835,13 +1837,24 @@ async def delete_crawler_item(
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("management:crawlers")),
 ) -> dict[str, Any]:
-    """删除单条爬虫数据。"""
+    """归档单条爬虫数据。
+
+    这里保留 DELETE 路径以兼容旧前端/脚本，但实际执行软删除，
+    避免市场情报证据链被物理删除打断。
+    """
     item = (await db.execute(select(CrawlerItem).where(CrawlerItem.id == item_id))).scalar_one_or_none()
     if not item:
         raise HTTPException(status_code=404, detail="数据不存在")
-    await db.delete(item)
+    item.is_invalid = True
+    item.invalid_reason = "用户归档"
     await db.flush()
-    return {"success": True, "message": f"已删除: {item.title[:30]}"}
+    return {
+        "success": True,
+        "message": f"已归档: {item.title[:30]}",
+        "id": item.id,
+        "is_invalid": item.is_invalid,
+        "invalid_reason": item.invalid_reason,
+    }
 
 
 @crawler_router.post("/items/batch-delete")
@@ -1850,14 +1863,19 @@ async def batch_delete_crawler_items(
     db: AsyncSession = Depends(get_db),
     _user: dict = Depends(require_permission("management:crawlers")),
 ) -> dict[str, Any]:
-    """批量删除爬虫数据。"""
+    """批量归档爬虫数据。"""
     ids = payload.get("ids") or []
     if not ids or not isinstance(ids, list):
-        raise HTTPException(status_code=400, detail="请提供要删除的 ID 列表")
-    stmt = delete(CrawlerItem).where(CrawlerItem.id.in_(ids))
+        raise HTTPException(status_code=400, detail="请提供要归档的 ID 列表")
+    reason = str(payload.get("reason") or "用户批量归档").strip()[:500]
+    stmt = (
+        update(CrawlerItem)
+        .where(CrawlerItem.id.in_(ids))
+        .values(is_invalid=True, invalid_reason=reason)
+    )
     result = await db.execute(stmt)
     await db.flush()
-    return {"success": True, "deleted_count": result.rowcount}
+    return {"success": True, "archived_count": result.rowcount, "is_invalid": True}
 
 
 @crawler_router.put("/items/{item_id}/mark")

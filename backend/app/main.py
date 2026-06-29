@@ -90,6 +90,21 @@ def _auto_migrate_sqlite() -> None:
             conn.execute("ALTER TABLE dingtalk_configs ADD COLUMN jianyu_api_key VARCHAR(255)")
         conn.execute(
             """
+            CREATE TABLE IF NOT EXISTS aipaas_configs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                base_url VARCHAR(500),
+                app_id VARCHAR(255),
+                sync_enabled BOOLEAN NOT NULL DEFAULT 0,
+                sync_interval_minutes INTEGER NOT NULL DEFAULT 60,
+                sync_users JSON NOT NULL DEFAULT '[]',
+                last_sync_at DATETIME,
+                last_sync_result JSON,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+            """
+        )
+        conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS opportunity_leads (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 project_name VARCHAR(500) NOT NULL,

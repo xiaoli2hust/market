@@ -7,6 +7,7 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Row,
@@ -75,6 +76,9 @@ import {
   fetchDingtalkConfig,
   updateDingtalkConfig,
   testDingtalk,
+  fetchAipaasConfig,
+  updateAipaasConfig,
+  triggerAipaasSync,
   fetchSystemInfo,
   changeCurrentPassword,
   logout,
@@ -89,6 +93,7 @@ import {
   SystemUser,
   RoleDef,
   APIKeyItem,
+  AipaasConfigData,
 } from '@/services/api';
 import {
   WorkbenchPageHeader,
@@ -1902,22 +1907,27 @@ const UsersTab: React.FC = () => {
 const SettingsTab: React.FC = () => {
   const [apiKeys, setApiKeys] = useState<APIKeyItem[]>([]);
   const [dingtalk, setDingtalk] = useState<any>(null);
+  const [aipaas, setAipaas] = useState<AipaasConfigData | null>(null);
   const [sysInfo, setSysInfo] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [testingDing, setTestingDing] = useState(false);
+  const [syncingAipaas, setSyncingAipaas] = useState(false);
   const [dingForm] = Form.useForm();
   const [jianyuForm] = Form.useForm();
+  const [aipaasForm] = Form.useForm();
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [k, d, s] = await Promise.all([
+      const [k, d, a, s] = await Promise.all([
         fetchAPIKeys().catch(() => []),
         fetchDingtalkConfig().catch(() => null),
+        fetchAipaasConfig().catch(() => null),
         fetchSystemInfo().catch(() => null),
       ]);
       setApiKeys(k);
       setDingtalk(d);
+      setAipaas(a);
       setSysInfo(s);
       if (d) {
         dingForm.setFieldsValue({
@@ -1938,8 +1948,17 @@ const SettingsTab: React.FC = () => {
           jianyu_api_key: '',
         });
       }
+      if (a) {
+        aipaasForm.setFieldsValue({
+          base_url: a.base_url || '',
+          app_id: a.app_id || '',
+          sync_enabled: Boolean(a.sync_enabled),
+          sync_interval_minutes: a.sync_interval_minutes || 60,
+          sync_users: a.sync_users?.length ? a.sync_users : [{ user_id: '', user_name: '' }],
+        });
+      }
     } finally { setLoading(false); }
-  }, [dingForm, jianyuForm]);
+  }, [dingForm, jianyuForm, aipaasForm]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -2001,6 +2020,35 @@ const SettingsTab: React.FC = () => {
     });
     message.success('结构化标讯配置已保存');
     load();
+  };
+
+  const handleSaveAipaas = async () => {
+    const values = await aipaasForm.validateFields();
+    await updateAipaasConfig({
+      base_url: values.base_url,
+      app_id: values.app_id,
+      sync_enabled: Boolean(values.sync_enabled),
+      sync_interval_minutes: values.sync_interval_minutes,
+      sync_users: (values.sync_users || []).filter((item: any) => item?.user_id && item?.user_name),
+    });
+    message.success('日报同步源已保存');
+    load();
+  };
+
+  const handleTriggerAipaas = async () => {
+    setSyncingAipaas(true);
+    try {
+      const result = await triggerAipaasSync({});
+      const text = result?.status === 'skipped'
+        ? result.message
+        : `同步完成：成功 ${result?.success || 0} 人，失败 ${result?.failed || 0} 人，跳过 ${result?.skipped || 0} 人`;
+      message.success(text || '同步完成');
+      load();
+    } catch (e: any) {
+      message.error(getApiErrorMessage(e, '同步失败'));
+    } finally {
+      setSyncingAipaas(false);
+    }
   };
 
   const handleTestDing = async () => {
@@ -2163,6 +2211,91 @@ const SettingsTab: React.FC = () => {
               {(dingtalk.capabilities || []).map((item: any) => (
                 <Tag key={item.key} color={item.ready ? 'green' : 'default'}>{item.label}</Tag>
               ))}
+            </Space>
+          </div>
+        )}
+      </div>
+
+      {/* AIPAAS 日报同步源 */}
+      <div className="mgmt-section">
+        <div className="mgmt-section-head">
+          <h3><DatabaseOutlined /> 日报同步源</h3>
+          <Space>
+            <Button onClick={handleTriggerAipaas} loading={syncingAipaas} size="small">立即同步</Button>
+            <Button type="primary" onClick={handleSaveAipaas} size="small">保存配置</Button>
+          </Space>
+        </div>
+        <Form form={aipaasForm} layout="vertical">
+          <div style={{ marginBottom: 12, padding: '8px 12px', background: 'var(--paper)', borderRadius: 6, border: '1px dashed var(--border)' }}>
+            <div style={{ fontSize: 12, color: 'var(--ink-faint)', marginBottom: 8 }}>AIPAAS 日报聊天记录 · 作为日报周报的数据来源之一</div>
+            <Space size={[6, 6]} wrap>
+              <Tag color={aipaas?.base_url && aipaas?.app_id ? 'green' : 'default'}>{aipaas?.base_url && aipaas?.app_id ? '连接信息已配置' : '连接信息未配置'}</Tag>
+              <Tag color={aipaas?.sync_enabled ? 'blue' : 'default'}>{aipaas?.sync_enabled ? '自动同步已开启' : '自动同步未开启'}</Tag>
+              <Tag color={(aipaas?.sync_users || []).length ? 'purple' : 'default'}>{(aipaas?.sync_users || []).length} 个同步人员</Tag>
+              {aipaas?.last_sync_at && <Tag color="cyan">最近同步 {dayjs(aipaas.last_sync_at).format('MM-DD HH:mm')}</Tag>}
+            </Space>
+          </div>
+          <Row gutter={16}>
+            <Col xs={24} md={12}>
+              <Form.Item label="服务地址" name="base_url">
+                <Input placeholder="https://aipaas.company.com" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={12}>
+              <Form.Item label="App ID" name="app_id">
+                <Input placeholder="AIPAAS 应用 ID" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={8}>
+              <Form.Item label="自动同步" name="sync_enabled" valuePropName="checked">
+                <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+              </Form.Item>
+            </Col>
+            <Col xs={24} md={8}>
+              <Form.Item label="同步间隔（分钟）" name="sync_interval_minutes" initialValue={60}>
+                <InputNumber min={10} max={1440} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Form.List name="sync_users">
+            {(fields, { add, remove }) => (
+              <div>
+                <div className="mgmt-section-head" style={{ padding: 0, marginBottom: 8 }}>
+                  <h3 style={{ fontSize: 14, margin: 0 }}><TeamOutlined /> 同步人员</h3>
+                  <Button size="small" icon={<PlusOutlined />} onClick={() => add({ user_id: '', user_name: '' })}>添加人员</Button>
+                </div>
+                {fields.length === 0 && <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有同步人员" />}
+                {fields.map((field) => (
+                  <Row gutter={12} key={field.key} align="middle">
+                    <Col xs={24} md={10}>
+                      <Form.Item {...field} label="工号" name={[field.name, 'user_id']}>
+                        <Input placeholder="例如 33342401" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={10}>
+                      <Form.Item {...field} label="姓名" name={[field.name, 'user_name']}>
+                        <Input placeholder="例如 张三" />
+                      </Form.Item>
+                    </Col>
+                    <Col xs={24} md={4}>
+                      <Button danger type="text" icon={<DeleteOutlined />} onClick={() => remove(field.name)}>删除</Button>
+                    </Col>
+                  </Row>
+                ))}
+              </div>
+            )}
+          </Form.List>
+        </Form>
+        {aipaas?.last_sync_result && (
+          <div style={{ fontSize: 12, marginTop: 8 }}>
+            <Text type="secondary">最近结果：</Text>
+            <Space size={[6, 6]} wrap>
+              <Tag>{String(aipaas.last_sync_result.status || 'completed')}</Tag>
+              {'total_users' in aipaas.last_sync_result && <Tag>人员 {String(aipaas.last_sync_result.total_users)}</Tag>}
+              {'success' in aipaas.last_sync_result && <Tag color="green">成功 {String(aipaas.last_sync_result.success)}</Tag>}
+              {'failed' in aipaas.last_sync_result && <Tag color="red">失败 {String(aipaas.last_sync_result.failed)}</Tag>}
+              {'skipped' in aipaas.last_sync_result && <Tag color="default">跳过 {String(aipaas.last_sync_result.skipped)}</Tag>}
+              {aipaas.last_sync_result.message && <Text type="secondary">{String(aipaas.last_sync_result.message)}</Text>}
             </Space>
           </div>
         )}

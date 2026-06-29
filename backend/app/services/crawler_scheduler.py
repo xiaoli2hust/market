@@ -163,38 +163,48 @@ async def _tick() -> None:
                 _state["last_run_at"] = datetime.now(timezone.utc)
 
         # AIPAAS 定时拉取
-        await _maybe_sync_aipaas(db)
+        if await _maybe_sync_aipaas(db):
+            await db.commit()
 
         if _state["status"] not in ("running", "error"):
             _state["status"] = "waiting"
 
 
-async def _maybe_sync_aipaas(db) -> None:
+async def _maybe_sync_aipaas(db) -> bool:
     """检查是否到了 AIPAAS 同步时间，如果是则执行拉取。"""
-    from ..config import settings
-    from .aipaas_service import pull_aipaas_daily_reports
+    from .aipaas_service import get_runtime_aipaas_config, pull_aipaas_daily_reports
 
-    if not settings.AIPAAS_SYNC_ENABLED:
-        return
-    if not settings.AIPAAS_BASE_URL or not settings.AIPAAS_APP_ID:
-        return
+    config = await get_runtime_aipaas_config(db)
+    if not config.get("sync_enabled"):
+        return False
+    if not config.get("base_url") or not config.get("app_id"):
+        return False
 
-    interval = timedelta(minutes=settings.AIPAAS_SYNC_INTERVAL_MINUTES)
+    interval = timedelta(minutes=int(config.get("sync_interval_minutes") or 60))
     last_sync = _state.get("aipaas_last_sync_at")
     if last_sync and isinstance(last_sync, datetime):
         if (datetime.now(timezone.utc) - last_sync) < interval:
-            return  # 还没到同步间隔
+            return False  # 还没到同步间隔
+    if config.get("last_sync_at"):
+        config_last_sync = config["last_sync_at"]
+        if isinstance(config_last_sync, datetime):
+            config_last_sync = _ensure_aware(config_last_sync)
+            if (datetime.now(timezone.utc) - config_last_sync) < interval:
+                _state["aipaas_last_sync_at"] = config_last_sync
+                _state["aipaas_last_result"] = config.get("last_sync_result")
+                return False
 
     try:
         logger.info("AIPAAS 定时同步开始")
-        # 注意：自动同步需要预配置用户列表
-        # 暂时仅记录状态，用户需通过 API 手动触发或配置用户列表
+        result = await pull_aipaas_daily_reports(db)
         _state["aipaas_last_sync_at"] = datetime.now(timezone.utc)
-        _state["aipaas_last_result"] = {"status": "skipped", "message": "自动同步需要配置用户列表，请通过 POST /api/aipaas-sync/trigger 手动触发"}
-        logger.info("AIPAAS 定时同步完成（需要配置用户列表后手动触发）")
+        _state["aipaas_last_result"] = result
+        logger.info("AIPAAS 定时同步完成: %s", result)
+        return True
     except Exception as exc:
         _state["aipaas_last_result"] = {"status": "error", "message": str(exc)[:200]}
         logger.error("AIPAAS 定时同步失败: %s", exc)
+        return False
 
 
 def _serialize_datetimes(value: Any) -> Any:

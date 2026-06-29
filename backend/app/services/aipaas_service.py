@@ -16,12 +16,103 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import settings
-from ..models import DailyReportFile, Staff
+from ..models import AipaasConfig, DailyReportFile, Staff
 
 logger = logging.getLogger(__name__)
 
 LOCAL_TZ = ZoneInfo("Asia/Shanghai")
 _REQUEST_TIMEOUT = 30
+
+
+def normalize_aipaas_users(users: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    """Return a clean, de-duplicated AIPAAS user list."""
+
+    cleaned: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in users or []:
+        user_id = str(item.get("user_id") or "").strip()
+        user_name = str(item.get("user_name") or "").strip()
+        if not user_id or not user_name or user_id in seen:
+            continue
+        cleaned.append({"user_id": user_id[:80], "user_name": user_name[:80]})
+        seen.add(user_id)
+    return cleaned
+
+
+async def get_runtime_aipaas_config(db: AsyncSession) -> dict[str, Any]:
+    """Load effective AIPAAS config, preferring management-center settings."""
+
+    row = (await db.execute(select(AipaasConfig).limit(1))).scalar_one_or_none()
+    if row:
+        return {
+            "base_url": row.base_url or settings.AIPAAS_BASE_URL,
+            "app_id": row.app_id or settings.AIPAAS_APP_ID,
+            "sync_enabled": bool(row.sync_enabled),
+            "sync_interval_minutes": max(int(row.sync_interval_minutes or 60), 10),
+            "sync_users": normalize_aipaas_users(row.sync_users or []),
+            "last_sync_at": row.last_sync_at,
+            "last_sync_result": row.last_sync_result or None,
+            "source": "management",
+        }
+    return {
+        "base_url": settings.AIPAAS_BASE_URL,
+        "app_id": settings.AIPAAS_APP_ID,
+        "sync_enabled": bool(settings.AIPAAS_SYNC_ENABLED),
+        "sync_interval_minutes": max(int(settings.AIPAAS_SYNC_INTERVAL_MINUTES or 60), 10),
+        "sync_users": [],
+        "last_sync_at": None,
+        "last_sync_result": None,
+        "source": "env",
+    }
+
+
+async def upsert_runtime_aipaas_config(db: AsyncSession, payload: dict[str, Any]) -> dict[str, Any]:
+    """Persist AIPAAS config in the management-center database."""
+
+    row = (await db.execute(select(AipaasConfig).limit(1))).scalar_one_or_none()
+    if row is None:
+        row = AipaasConfig(
+            base_url=settings.AIPAAS_BASE_URL or None,
+            app_id=settings.AIPAAS_APP_ID or None,
+            sync_enabled=bool(settings.AIPAAS_SYNC_ENABLED),
+            sync_interval_minutes=max(int(settings.AIPAAS_SYNC_INTERVAL_MINUTES or 60), 10),
+            sync_users=[],
+        )
+        db.add(row)
+        await db.flush()
+
+    if "base_url" in payload:
+        row.base_url = str(payload.get("base_url") or "").strip() or None
+    if "app_id" in payload:
+        row.app_id = str(payload.get("app_id") or "").strip() or None
+    if "sync_enabled" in payload:
+        row.sync_enabled = bool(payload.get("sync_enabled"))
+    if "sync_interval_minutes" in payload and payload.get("sync_interval_minutes") is not None:
+        row.sync_interval_minutes = max(int(payload.get("sync_interval_minutes") or 60), 10)
+    if "sync_users" in payload:
+        row.sync_users = normalize_aipaas_users(payload.get("sync_users") or [])
+
+    await db.flush()
+    return await get_runtime_aipaas_config(db)
+
+
+async def record_aipaas_sync_result(db: AsyncSession, result: dict[str, Any]) -> None:
+    """Persist latest AIPAAS sync status for the management center."""
+
+    row = (await db.execute(select(AipaasConfig).limit(1))).scalar_one_or_none()
+    if row is None:
+        row = AipaasConfig(
+            base_url=settings.AIPAAS_BASE_URL or None,
+            app_id=settings.AIPAAS_APP_ID or None,
+            sync_enabled=bool(settings.AIPAAS_SYNC_ENABLED),
+            sync_interval_minutes=max(int(settings.AIPAAS_SYNC_INTERVAL_MINUTES or 60), 10),
+            sync_users=[],
+        )
+        db.add(row)
+        await db.flush()
+    row.last_sync_at = datetime.now(timezone.utc)
+    row.last_sync_result = result
+    await db.flush()
 
 
 async def pull_aipaas_daily_reports(
@@ -46,15 +137,23 @@ async def pull_aipaas_daily_reports(
     -------
     拉取结果统计。
     """
-    if not settings.AIPAAS_BASE_URL:
-        return {"status": "skipped", "message": "AIPAAS_BASE_URL 未配置"}
-    if not settings.AIPAAS_APP_ID:
-        return {"status": "skipped", "message": "AIPAAS_APP_ID 未配置"}
+    config = await get_runtime_aipaas_config(db)
+    base_url = str(config.get("base_url") or "").strip()
+    app_id = str(config.get("app_id") or "").strip()
+    if not base_url:
+        result = {"status": "skipped", "message": "AIPAAS 地址未配置"}
+        await record_aipaas_sync_result(db, result)
+        return result
+    if not app_id:
+        result = {"status": "skipped", "message": "AIPAAS App ID 未配置"}
+        await record_aipaas_sync_result(db, result)
+        return result
 
     report_date = target_date or datetime.now(tz=LOCAL_TZ).date()
     date_str = report_date.strftime("%Y%m%d")
 
     stats = {
+        "status": "completed",
         "date": report_date.isoformat(),
         "total_users": 0,
         "success": 0,
@@ -63,13 +162,16 @@ async def pull_aipaas_daily_reports(
         "details": [],
     }
 
-    if not user_list:
-        return {"status": "skipped", "message": "用户列表为空，请配置需要同步的人员"}
+    users = normalize_aipaas_users(user_list) or normalize_aipaas_users(config.get("sync_users") or [])
+    if not users:
+        result = {"status": "skipped", "message": "用户列表为空，请在管理中心配置需要同步的人员"}
+        await record_aipaas_sync_result(db, result)
+        return result
 
-    stats["total_users"] = len(user_list)
+    stats["total_users"] = len(users)
 
     async with httpx.AsyncClient(timeout=_REQUEST_TIMEOUT) as client:
-        for user in user_list:
+        for user in users:
             user_id = str(user.get("user_id", "")).strip()
             user_name = str(user.get("user_name", "")).strip()
             if not user_id or not user_name:
@@ -79,6 +181,8 @@ async def pull_aipaas_daily_reports(
             try:
                 result = await _pull_single_user(
                     client, db,
+                    base_url=base_url,
+                    app_id=app_id,
                     user_id=user_id,
                     user_name=user_name,
                     date_str=date_str,
@@ -100,6 +204,7 @@ async def pull_aipaas_daily_reports(
         "AIPAAS 同步完成: date=%s total=%d success=%d failed=%d skipped=%d",
         report_date, stats["total_users"], stats["success"], stats["failed"], stats["skipped"],
     )
+    await record_aipaas_sync_result(db, stats)
     return stats
 
 
@@ -107,6 +212,8 @@ async def _pull_single_user(
     client: httpx.AsyncClient,
     db: AsyncSession,
     *,
+    base_url: str,
+    app_id: str,
     user_id: str,
     user_name: str,
     date_str: str,
@@ -115,8 +222,8 @@ async def _pull_single_user(
     """拉取单个用户的日报数据。返回 success / no_data / error。"""
 
     file_path = f"/user_chat/{user_id}_{user_name}_{date_str}.json"
-    url = f"{settings.AIPAAS_BASE_URL.rstrip('/')}/SkillsApp/api/v1/vfs/read"
-    params = {"app_id": settings.AIPAAS_APP_ID, "file_path": file_path}
+    url = f"{base_url.rstrip('/')}/SkillsApp/api/v1/vfs/read"
+    params = {"app_id": app_id, "file_path": file_path}
 
     response = await client.get(url, params=params)
 

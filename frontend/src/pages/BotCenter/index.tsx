@@ -1161,7 +1161,7 @@ const BotCenter: React.FC = () => {
         metrics={[
           { label: '当前机器人', value: selectedProfileData?.name || '未选择', icon: <RobotOutlined />, tone: 'blue', hint: selectedProfileData?.description || '选择一个机器人开始测试' },
           { label: '绑定 Skill', value: boundSkills.length, icon: <ToolOutlined />, tone: 'purple', hint: '只调用已绑定且已启用的 Skill' },
-          { label: '自动任务', value: overview?.active_tasks ?? taskTotal, icon: <ClockCircleOutlined />, tone: 'green', hint: '可手动运行，后续接调度器' },
+          { label: '自动任务', value: overview?.active_tasks ?? taskTotal, icon: <ClockCircleOutlined />, tone: 'green', hint: '按计划或人工触发运行' },
           { label: '评测风险', value: qualitySummary?.failed_evaluation_runs ?? overview?.failed_evaluations ?? 0, icon: <AuditOutlined />, tone: 'gold', hint: '失败用例进入纠错闭环' },
           { label: '渠道适配器', value: overview?.enabled_adapters ?? adapters.filter((item) => item.status === 'enabled').length, icon: <ApiOutlined />, tone: 'blue', hint: '签名、限流、重试和能力声明' },
         ]}
@@ -1206,7 +1206,7 @@ const BotCenter: React.FC = () => {
               <Input
                 value={simulatedRole}
                 onChange={(event) => setSimulatedRole(event.target.value)}
-                placeholder="模拟用户身份"
+                placeholder="测试用户身份"
               />
               <Button onClick={handleNewConversation}>清空会话</Button>
             </div>
@@ -1587,7 +1587,7 @@ const BotCenter: React.FC = () => {
           </Form>
         </WorkbenchSection>
 
-        <WorkbenchSection title="入站消息测试" description="模拟群成员发消息，验证绑定机器人、Skill 调用和证据链。">
+        <WorkbenchSection title="入站消息测试" description="用真实问法验证群消息路由、Skill 调用和证据链。">
           <Form<InboundFormValues> form={inboundForm} layout="vertical">
             <div className="bot-form-row">
               <Form.Item label="测试群聊" name="channel_key">

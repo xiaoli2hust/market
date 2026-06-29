@@ -1930,6 +1930,39 @@ export async function testDingtalk() {
   return request('/api/settings/dingtalk/test', { method: 'POST' });
 }
 
+export interface AipaasUserItem {
+  user_id: string;
+  user_name: string;
+}
+
+export interface AipaasConfigData {
+  base_url: string;
+  app_id: string;
+  sync_enabled: boolean;
+  sync_interval_minutes: number;
+  sync_users: AipaasUserItem[];
+  last_sync_at?: string | null;
+  last_sync_result?: Record<string, any> | null;
+  source?: string;
+  configured?: boolean;
+}
+
+export async function fetchAipaasConfig(): Promise<AipaasConfigData> {
+  return request<AipaasConfigData>('/api/aipaas-sync/config', { method: 'GET' });
+}
+
+export async function updateAipaasConfig(data: Partial<AipaasConfigData>) {
+  return request<AipaasConfigData>('/api/aipaas-sync/config', { method: 'PUT', data });
+}
+
+export async function triggerAipaasSync(data: { date?: string; users?: AipaasUserItem[] } = {}) {
+  return request('/api/aipaas-sync/trigger', {
+    method: 'POST',
+    data,
+    timeout: LONG_TASK_TIMEOUT_MS,
+  });
+}
+
 export async function fetchSystemInfo() {
   return request('/api/settings/system', { method: 'GET' });
 }
