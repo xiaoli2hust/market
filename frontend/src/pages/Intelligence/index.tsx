@@ -1,12 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Button,
-  Empty,
-  Input,
-  Segmented,
   Space,
-  Spin,
-  Table,
   Tabs,
   Tag,
   message,
@@ -14,14 +9,9 @@ import {
 import {
   CheckCircleOutlined,
   DatabaseOutlined,
-  EyeOutlined,
   FileSearchOutlined,
   FunnelPlotOutlined,
-  GlobalOutlined,
-  LinkOutlined,
-  ReloadOutlined,
   RobotOutlined,
-  SearchOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
@@ -45,77 +35,27 @@ import {
   WorkbenchMetricGrid,
   WorkbenchPageHeader,
   WorkbenchSection,
-  WorkbenchStatusRail,
 } from '@/components/workbench';
 import {
-  AgentSection,
-  DistributionList,
-  EvidenceRecordList,
-  InsightPanel,
-  MetricGrid,
   ModuleTab,
-  TopSignalList,
 } from './components';
+import {
+  BiddingAgentView,
+  CompetitorAgentView,
+  IndustryKnowledgeAgentView,
+  PolicyMarketAgentView,
+} from './AgentViews';
+import { DataCenterView } from './DataCenterView';
+import {
+  DATA_CATEGORY_OPTIONS,
+  DataSortBy,
+  DataSortOrder,
+  INTELLIGENCE_CRAWLER_MESSAGE_KEY,
+  PAGE_SIZE,
+  formatWanAmount,
+} from './intelligenceMeta';
 import './intelligence.less';
 
-const PAGE_SIZE = 12;
-const INTELLIGENCE_CRAWLER_MESSAGE_KEY = 'intelligence-crawler-run';
-type DataSortBy = 'published_at' | 'amount' | 'relevance' | 'created_at';
-type DataSortOrder = 'asc' | 'desc';
-
-const CATEGORY_META: Record<string, { label: string; color: string; icon: React.ReactNode }> = {
-  bidding: { label: '标讯数据', color: '#f5222d', icon: <FileSearchOutlined /> },
-  policy: { label: '政策法规', color: '#13c2c2', icon: <GlobalOutlined /> },
-  news: { label: '市场线索', color: '#1890ff', icon: <GlobalOutlined /> },
-  competitor: { label: '竞对监控', color: '#fa8c16', icon: <EyeOutlined /> },
-  ai: { label: '行业知识', color: '#722ed1', icon: <RobotOutlined /> },
-};
-
-const DATA_CATEGORY_OPTIONS = [
-  { value: 'all', label: '全部' },
-  { value: 'bidding', label: '标讯' },
-  { value: 'policy', label: '政策' },
-  { value: 'news', label: '市场' },
-  { value: 'competitor', label: '竞对' },
-  { value: 'ai', label: '行业知识' },
-];
-
-const formatWanAmount = (amount?: number) => {
-  const value = Number(amount || 0);
-  if (!value) return '0万';
-  if (value >= 10000) return `${(value / 10000).toFixed(2)}亿`;
-  if (value >= 100) return `${value.toFixed(1)}万`;
-  return `${value.toFixed(2)}万`;
-};
-
-const itemAmountWan = (item: IntelligenceItem) => Number(item.amount_wan ?? item.extra_data?.amount_wan ?? 0);
-
-const itemAmountText = (item: IntelligenceItem) => {
-  const explicit = item.amount_display || item.extra_data?.amount_display;
-  if (explicit) return String(explicit);
-  const amount = itemAmountWan(item);
-  return amount > 0 ? formatWanAmount(amount) : '—';
-};
-
-const itemSourceText = (item: IntelligenceItem) => (
-  item.category === 'bidding' ? '标讯数据' : item.source || item.extra_data?.source || '外部信号'
-);
-
-const tableSortOrder = (active: boolean, order: DataSortOrder) => (
-  active ? (order === 'asc' ? 'ascend' : 'descend') : undefined
-) as 'ascend' | 'descend' | undefined;
-
-const uniqueTexts = (...groups: Array<string[] | undefined>) => {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  groups.flat().forEach((text) => {
-    const value = String(text || '').trim();
-    if (!value || seen.has(value)) return;
-    seen.add(value);
-    result.push(value);
-  });
-  return result;
-};
 
 const Intelligence: React.FC = () => {
   const currentUser = getCurrentUser();
@@ -303,93 +243,6 @@ const Intelligence: React.FC = () => {
     },
   ]), [biddingAnalysis, policyAnalysis, marketAnalysis, competitorAnalysis, aiAnalysis]);
 
-  const dataQualityStats = useMemo(() => {
-    const withDate = items.filter((item) => !!item.published_at).length;
-    const withAmount = items.filter((item) => itemAmountWan(item) > 0).length;
-    const withSource = items.filter((item) => !!item.source_url).length;
-    return [
-      { label: '当前页', value: `${items.length} 条`, status: items.length ? 'good' as const : 'muted' as const },
-      { label: '有发布日期', value: `${withDate} 条`, meta: `${items.length ? Math.round((withDate / items.length) * 100) : 0}%`, status: withDate ? 'good' as const : 'warn' as const },
-      { label: '有金额', value: `${withAmount} 条`, meta: dataCategory === 'bidding' ? '标讯重点字段' : '非标讯可为空', status: withAmount ? 'good' as const : 'warn' as const },
-      { label: '可追溯原文', value: `${withSource} 条`, status: withSource ? 'good' as const : 'warn' as const },
-    ];
-  }, [items, dataCategory]);
-
-  const dataColumns = useMemo(() => [
-    {
-      title: '信号',
-      dataIndex: 'title',
-      key: 'title',
-      render: (_: string, item: IntelligenceItem) => {
-        const meta = CATEGORY_META[item.category] || CATEGORY_META.news;
-        const keywords = item.extra_data?.matched_keywords || [];
-        return (
-          <div className="intel-data-title">
-            <div>
-              <Tag color={meta.color} icon={meta.icon}>{meta.label}</Tag>
-              <strong onClick={() => item.source_url && window.open(item.source_url, '_blank', 'noopener,noreferrer')}>{item.title}</strong>
-            </div>
-            {(item.summary || item.content) && <p>{item.summary || item.content?.slice(0, 120)}</p>}
-            {!!keywords.length && (
-              <div className="intel-data-keywords">
-                {keywords.slice(0, 4).map((kw: string) => <Tag key={kw}>{kw}</Tag>)}
-              </div>
-            )}
-          </div>
-        );
-      },
-    },
-    {
-      title: '发布日期',
-      dataIndex: 'published_at',
-      key: 'published_at',
-      width: 124,
-      sorter: true,
-      sortOrder: tableSortOrder(sortBy === 'published_at', sortOrder),
-      render: (_: string, item: IntelligenceItem) => (
-        <div className="intel-data-date">
-          <strong>{item.published_at ? dayjs(item.published_at).format('YYYY-MM-DD') : '未标日期'}</strong>
-          {!item.published_at && item.created_at && <span>入库 {dayjs(item.created_at).format('MM-DD')}</span>}
-        </div>
-      ),
-    },
-    {
-      title: '金额',
-      dataIndex: 'amount_wan',
-      key: 'amount_wan',
-      width: 112,
-      align: 'right' as const,
-      sorter: true,
-      sortOrder: tableSortOrder(sortBy === 'amount', sortOrder),
-      render: (_: number, item: IntelligenceItem) => (
-        <span className={itemAmountWan(item) > 0 ? 'intel-data-amount strong' : 'intel-data-amount'}>
-          {itemAmountText(item)}
-        </span>
-      ),
-    },
-    {
-      title: '相关度',
-      dataIndex: 'relevance_score',
-      key: 'relevance_score',
-      width: 96,
-      align: 'right' as const,
-      sorter: true,
-      sortOrder: tableSortOrder(sortBy === 'relevance', sortOrder),
-      render: (score?: number) => (score == null ? '—' : <span className="edl-mono">{Math.round(score)}</span>),
-    },
-    {
-      title: '来源',
-      dataIndex: 'source',
-      key: 'source',
-      width: 170,
-      render: (_: string, item: IntelligenceItem) => (
-        <div className="intel-data-source">
-          <span>{itemSourceText(item)}</span>
-          {item.source_url && <LinkOutlined onClick={() => window.open(item.source_url, '_blank', 'noopener,noreferrer')} />}
-        </div>
-      ),
-    },
-  ], [sortBy, sortOrder]);
 
   const handleTableChange = (pagination: any, _: any, sorter: any) => {
     const activeSorter = Array.isArray(sorter) ? sorter[0] : sorter;
@@ -411,339 +264,38 @@ const Intelligence: React.FC = () => {
     setSortOrder(activeSorter.order === 'ascend' ? 'asc' : 'desc');
   };
 
-  const renderBiddingAgent = () => (
-    <Spin spinning={analysisLoading}>
-      <AgentSection
-        eyebrow="Bidding Radar Agent"
-        title="标讯雷达 Agent"
-        desc="不是把标讯堆给销售，而是先判断哪些值得关注、集中在哪些行业场景、由哪些关键词触发。"
-        actions={(
-          <Space>
-            <Segmented
-              value={analysisPeriod}
-              onChange={(value) => setAnalysisPeriod(value as 'week' | 'month')}
-              options={[{ label: '本周', value: 'week' }, { label: '本月', value: 'month' }]}
-            />
-            <Button icon={<FileSearchOutlined />} onClick={() => openDataCenter('bidding')}>
-              标讯雷达明细
-            </Button>
-          </Space>
-        )}
-      >
-        {biddingAnalysis ? (
-          <>
-            <MetricGrid
-              metrics={[
-                ['有效标讯', biddingAnalysis.summary.relevant, '条'],
-                ['平均贴合度', biddingAnalysis.summary.avg_score, '分'],
-                ['识别金额', formatWanAmount(biddingAnalysis.summary.amount_total_wan), ''],
-                ['过滤噪音', biddingAnalysis.summary.ignored, '条'],
-              ]}
-            />
-            <div className="intel-agent-grid">
-              <InsightPanel title="当前判断">
-                {(biddingAnalysis.findings || []).map((text) => <p key={text}>{text}</p>)}
-              </InsightPanel>
-              <InsightPanel title="建议动作">
-                {(biddingAnalysis.recommendations || []).map((text) => <p key={text}>{text}</p>)}
-              </InsightPanel>
-              <InsightPanel title="行业/场景分布">
-                <DistributionList items={biddingAnalysis.distribution.topics} tone="red" />
-                <DistributionList items={biddingAnalysis.distribution.customer_types} />
-              </InsightPanel>
-              <InsightPanel title="关键词触发分布">
-                <DistributionList items={biddingAnalysis.distribution.keywords || []} tone="red" />
-              </InsightPanel>
-            </div>
-            <TopSignalList
-              title="高贴合标讯关注"
-              items={biddingAnalysis.top_items || []}
-              emptyText="暂无高贴合标讯"
-              onOpenData={() => openDataCenter('bidding')}
-            />
-            <EvidenceRecordList
-              title="分析证据记录"
-              items={biddingAnalysis.evidence_records || []}
-              onOpenData={() => openDataCenter('bidding')}
-            />
-          </>
-        ) : (
-          <Empty description="暂无标讯分析数据" />
-        )}
-      </AgentSection>
-    </Spin>
-  );
 
-  const renderPolicyMarketAgent = () => {
-    const recommendations = uniqueTexts(policyAnalysis?.recommendations, marketAnalysis?.recommendations);
-    const findings = uniqueTexts(policyAnalysis?.findings, marketAnalysis?.findings);
-    return (
-      <Spin spinning={analysisLoading}>
-        <AgentSection
-          eyebrow="Policy & Market Tracking Agent"
-          title="政策与市场跟踪 Agent"
-          desc="只分析高相关政策和市场线索，回答市场导向、客户方向和应该沉淀成什么打法。"
-          actions={(
-            <Segmented
-              value={analysisPeriod}
-              onChange={(value) => setAnalysisPeriod(value as 'week' | 'month')}
-              options={[{ label: '本周', value: 'week' }, { label: '本月', value: 'month' }]}
-            />
-          )}
-        >
-          <MetricGrid
-            metrics={[
-              ['高相关政策', policyAnalysis?.summary.relevant || 0, '条'],
-              ['市场线索', marketAnalysis?.summary.relevant || 0, '条'],
-              ['政策评分', policyAnalysis?.summary.avg_score || 0, '分'],
-              ['市场评分', marketAnalysis?.summary.avg_score || 0, '分'],
-            ]}
-          />
-          <div className="intel-agent-grid">
-            <InsightPanel title="市场导向">
-              {findings.length ? findings.slice(0, 5).map((text) => <p key={text}>{text}</p>) : <p>暂无高相关政策与市场信号。</p>}
-            </InsightPanel>
-            <InsightPanel title="Agent 建议">
-              {recommendations.length ? recommendations.slice(0, 5).map((text) => <p key={text}>{text}</p>) : <p>先补充政策和市场采集源，再形成导向判断。</p>}
-            </InsightPanel>
-            <InsightPanel title="政策主题">
-              <DistributionList items={policyAnalysis?.distribution.topics || []} tone="cyan" />
-            </InsightPanel>
-            <InsightPanel title="市场关键词">
-              <DistributionList items={marketAnalysis?.distribution.keywords || []} />
-            </InsightPanel>
-          </div>
-          <TopSignalList
-            title="重点政策与市场信号"
-            items={[...(policyAnalysis?.top_items || []), ...(marketAnalysis?.top_items || [])].slice(0, 8)}
-            emptyText="暂无重点政策或市场信号"
-            onOpenData={() => openDataCenter('policy')}
-          />
-          <EvidenceRecordList
-            title="导向判断证据"
-            items={[...(policyAnalysis?.evidence_records || []), ...(marketAnalysis?.evidence_records || [])].slice(0, 12)}
-            onOpenData={() => openDataCenter('policy')}
-          />
-        </AgentSection>
-      </Spin>
-    );
+  const intelligenceCtx = {
+    analysisLoading,
+    analysisPeriod,
+    setAnalysisPeriod,
+    openDataCenter,
+    biddingAnalysis,
+    policyAnalysis,
+    marketAnalysis,
+    competitorAnalysis,
+    aiAnalysis,
+    items,
+    dataCategory,
+    crawlerStatus,
+    crawling,
+    canRunAgents,
+    dataCategoryOptions,
+    searchValue,
+    setSearchValue,
+    handleSearch,
+    handleCrawlAll,
+    setDataCategory,
+    setSortBy,
+    setSortOrder,
+    setPage,
+    sortBy,
+    sortOrder,
+    loading,
+    page,
+    total,
+    handleTableChange,
   };
-
-  const renderCompetitorAgent = () => (
-    <Spin spinning={analysisLoading}>
-      <AgentSection
-        eyebrow="Competitor Monitoring Agent"
-        title="竞对监控 Agent"
-        desc="围绕竞对中标、重点客户案例、产品动作和区域推进做研判，输出应该关注什么、如何调整打法。"
-        actions={(
-          <Space>
-            <Segmented
-              value={analysisPeriod}
-              onChange={(value) => setAnalysisPeriod(value as 'week' | 'month')}
-              options={[{ label: '本周', value: 'week' }, { label: '本月', value: 'month' }]}
-            />
-            <Button icon={<EyeOutlined />} onClick={() => openDataCenter('competitor')}>
-              竞对信号明细
-            </Button>
-          </Space>
-        )}
-      >
-        {competitorAnalysis ? (
-          <>
-            <MetricGrid
-              metrics={[
-                ['有效竞对信号', competitorAnalysis.summary.relevant, '条'],
-                ['平均影响评分', competitorAnalysis.summary.avg_score, '分'],
-                ['动作类型', competitorAnalysis.distribution.actions.length, '类'],
-                ['证据记录', competitorAnalysis.summary.evidence_count || 0, '条'],
-              ]}
-            />
-            <div className="intel-agent-grid">
-              <InsightPanel title="竞对判断">
-                {(competitorAnalysis.findings || []).map((text) => <p key={text}>{text}</p>)}
-              </InsightPanel>
-              <InsightPanel title="建议动作">
-                {(competitorAnalysis.recommendations || []).map((text) => <p key={text}>{text}</p>)}
-              </InsightPanel>
-              <InsightPanel title="竞对主题">
-                <DistributionList items={competitorAnalysis.distribution.topics || []} />
-              </InsightPanel>
-              <InsightPanel title="客户与区域">
-                <DistributionList items={competitorAnalysis.distribution.customer_types || []} />
-                <DistributionList items={competitorAnalysis.distribution.regions || []} />
-              </InsightPanel>
-            </div>
-            <TopSignalList
-              title="重点竞对动作"
-              items={competitorAnalysis.top_items || []}
-              emptyText="暂无重点竞对信号"
-              onOpenData={() => openDataCenter('competitor')}
-            />
-            <EvidenceRecordList
-              title="竞对判断证据"
-              items={competitorAnalysis.evidence_records || []}
-              onOpenData={() => openDataCenter('competitor')}
-            />
-          </>
-        ) : (
-          <Empty description="暂无竞对分析数据" />
-        )}
-      </AgentSection>
-    </Spin>
-  );
-
-  const renderIndustryKnowledgeAgent = () => (
-    <Spin spinning={analysisLoading}>
-      <AgentSection
-        eyebrow="Industry Knowledge Agent"
-        title="行业知识 Agent"
-        desc="沉淀 Agent、空间数据、GIS、地址治理、数据治理和行业技术动态，用于售前话术、方案素材和产品方向判断。"
-        actions={(
-          <Space>
-            <Segmented
-              value={analysisPeriod}
-              onChange={(value) => setAnalysisPeriod(value as 'week' | 'month')}
-              options={[{ label: '本周', value: 'week' }, { label: '本月', value: 'month' }]}
-            />
-            <Button icon={<RobotOutlined />} onClick={() => openDataCenter('ai')}>
-              知识素材明细
-            </Button>
-          </Space>
-        )}
-      >
-        {aiAnalysis ? (
-          <>
-            <MetricGrid
-              metrics={[
-                ['有效知识素材', aiAnalysis.summary.relevant, '条'],
-                ['平均相关度', aiAnalysis.summary.avg_score, '分'],
-                ['主题数量', aiAnalysis.distribution.topics.length, '类'],
-                ['证据记录', aiAnalysis.summary.evidence_count || 0, '条'],
-              ]}
-            />
-            <div className="intel-agent-grid">
-              <InsightPanel title="知识判断">
-                {(aiAnalysis.findings || []).map((text) => <p key={text}>{text}</p>)}
-              </InsightPanel>
-              <InsightPanel title="沉淀建议">
-                {(aiAnalysis.recommendations || []).map((text) => <p key={text}>{text}</p>)}
-              </InsightPanel>
-              <InsightPanel title="主题分布">
-                <DistributionList items={aiAnalysis.distribution.topics || []} />
-              </InsightPanel>
-              <InsightPanel title="关键词与动作">
-                <DistributionList items={aiAnalysis.distribution.keywords || []} />
-                <DistributionList items={aiAnalysis.distribution.actions || []} />
-              </InsightPanel>
-            </div>
-            <TopSignalList
-              title="重点知识素材"
-              items={aiAnalysis.top_items || []}
-              emptyText="暂无重点行业知识"
-              onOpenData={() => openDataCenter('ai')}
-            />
-            <EvidenceRecordList
-              title="知识判断证据"
-              items={aiAnalysis.evidence_records || []}
-              onOpenData={() => openDataCenter('ai')}
-            />
-          </>
-        ) : (
-          <Empty description="暂无行业知识分析数据" />
-        )}
-      </AgentSection>
-    </Spin>
-  );
-
-  const renderDataCenter = () => (
-    <div className="intel-data-center">
-      <div className="intel-crawler-bar">
-        <div className="crawler-bar-label">
-          <RobotOutlined /> 采集状态
-        </div>
-        <div className="crawler-bar-items">
-          {crawlerStatus.map((cs) => (
-            <div key={cs.name} className="crawler-bar-item">
-              <span className="crawler-dot" data-status={cs.status} />
-              <span className="crawler-name">{cs.label}</span>
-              <span className="crawler-count edl-mono">{cs.total_collected}</span>
-            </div>
-          ))}
-        </div>
-        <Button
-          icon={<ReloadOutlined spin={crawling} />}
-          size="small"
-          onClick={handleCrawlAll}
-          loading={crawling}
-          disabled={!canRunAgents}
-          title={!canRunAgents ? '当前账号无采集管理权限' : undefined}
-        >
-          重新采集
-        </Button>
-      </div>
-
-      <div className="intel-data-toolbar">
-        <div className="intel-type-switch">
-          <span>数据类型</span>
-          <Segmented
-            value={dataCategory}
-            onChange={(key) => {
-              const nextCategory = String(key);
-              setDataCategory(nextCategory);
-              setSortBy(nextCategory === 'bidding' ? 'amount' : 'published_at');
-              setSortOrder('desc');
-              setPage(1);
-            }}
-            options={dataCategoryOptions}
-          />
-        </div>
-        <Segmented
-          className="intel-data-sort"
-          value={`${sortBy}:${sortOrder}`}
-          onChange={(value) => {
-            const [nextSortBy, nextSortOrder] = String(value).split(':') as [DataSortBy, DataSortOrder];
-            setSortBy(nextSortBy);
-            setSortOrder(nextSortOrder);
-            setPage(1);
-          }}
-          options={[
-            { label: '最新优先', value: 'published_at:desc' },
-            { label: '金额最高', value: 'amount:desc' },
-            { label: '相关度最高', value: 'relevance:desc' },
-          ]}
-        />
-        <Input.Search
-          className="intel-data-search"
-          placeholder="搜索标题、摘要..."
-          value={searchValue}
-          onChange={(e) => setSearchValue(e.target.value)}
-          onSearch={handleSearch}
-          enterButton={<SearchOutlined />}
-          allowClear
-          />
-        </div>
-
-      <WorkbenchStatusRail items={dataQualityStats} />
-
-      <Table<IntelligenceItem>
-        className="intel-data-table"
-        rowKey="id"
-        loading={loading}
-        dataSource={items}
-        columns={dataColumns}
-        scroll={{ x: 820 }}
-        onChange={handleTableChange}
-        pagination={{
-          current: page,
-          pageSize: PAGE_SIZE,
-          total,
-          showSizeChanger: false,
-          showTotal: (count) => `共 ${count} 条`,
-        }}
-        locale={{ emptyText: <Empty description="暂无市场数据" /> }}
-      />
-    </div>
-  );
 
   return (
     <div className="intel">
@@ -809,27 +361,27 @@ const Intelligence: React.FC = () => {
           {
             key: 'bidding-agent',
             label: <ModuleTab no="01" title="标讯雷达 Agent" desc="贴合度、金额、行业与关键词" />,
-            children: renderBiddingAgent(),
+            children: <BiddingAgentView ctx={intelligenceCtx} />,
           },
           {
             key: 'policy-market-agent',
             label: <ModuleTab no="02" title="政策与市场跟踪 Agent" desc="政策导向、市场信号、客户方向" />,
-            children: renderPolicyMarketAgent(),
+            children: <PolicyMarketAgentView ctx={intelligenceCtx} />,
           },
           {
             key: 'competitor-agent',
             label: <ModuleTab no="03" title="竞对监控 Agent" desc="中标、案例、产品与区域动作" />,
-            children: renderCompetitorAgent(),
+            children: <CompetitorAgentView ctx={intelligenceCtx} />,
           },
           {
             key: 'industry-knowledge-agent',
             label: <ModuleTab no="04" title="行业知识 Agent" desc="Agent、空间数据、方案素材" />,
-            children: renderIndustryKnowledgeAgent(),
+            children: <IndustryKnowledgeAgentView ctx={intelligenceCtx} />,
           },
           {
             key: 'data-center',
             label: <ModuleTab no="05" title="市场数据采集中心" desc="标讯、政策、市场、竞对、知识库" />,
-            children: renderDataCenter(),
+            children: <DataCenterView ctx={intelligenceCtx} />,
           },
         ]}
       />

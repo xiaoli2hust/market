@@ -9,7 +9,8 @@
     "postinstall": "max setup",
     "setup": "max setup",
     "start": "npm run dev",
-    "tsc": "tsc --noEmit"
+    "tsc": "tsc --noEmit",
+    "test:frontend": "node scripts/frontend_contract_tests.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^5.5.1",

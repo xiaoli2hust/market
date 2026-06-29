@@ -19,6 +19,11 @@ import tempfile
 from pathlib import Path
 from typing import Callable
 
+from engineering_acceptance_deploy import (
+    check_container_deploy_contract,
+    check_public_deployment_toolkit_contract,
+    check_public_html_response_contract,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
@@ -29,8 +34,22 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def _read_frontend_services() -> str:
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "frontend/src/services").rglob("*.ts"))
+    )
+
+
+def _read_frontend_page_tree(page: str) -> str:
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / f"frontend/src/pages/{page}").rglob("*.ts*"))
+    )
+
+
 def check_long_task_timeout_contract() -> None:
-    api = _read("frontend/src/services/api.ts")
+    api = _read_frontend_services()
     assert "const LONG_TASK_TIMEOUT_MS = 300000" in api, "前端必须为长任务定义统一超时"
     assert "const CRAWLER_TASK_TIMEOUT_MS = 1800000" in api, "前端必须为公开网站采集定义爬虫专用超时"
     for function_name in (
@@ -86,18 +105,21 @@ def check_secret_store_contract() -> None:
 def check_webhook_url_is_encrypted() -> None:
     settings_router = _read("backend/app/routers/settings.py")
     dingtalk_service = _read("backend/app/services/dingtalk_service.py")
-    main = _read("backend/app/main.py")
+    sqlite_migration = (
+        _read("backend/app/sqlite_auto_migration.py")
+        + _read("backend/app/sqlite_bot_migration.py")
+    )
     assert "webhook_url = decrypt_secret(row.webhook_url)" in settings_router, "管理页读取 Webhook 必须解密"
     assert "row.webhook_url = encrypt_secret(webhook)" in settings_router, "保存 Webhook 必须加密"
     assert "decrypt_secret(row.webhook_url)" in dingtalk_service, "发送服务读取 Webhook 必须解密"
-    assert '"webhook_url", "secret", "app_secret"' in main, "SQLite 历史 Webhook 明文必须自动加密"
+    assert '"webhook_url", "secret", "app_secret"' in sqlite_migration, "SQLite 历史 Webhook 明文必须自动加密"
 
 
 def check_dingtalk_identity_contract() -> None:
     model = _read("backend/app/models.py")
     settings_router = _read("backend/app/routers/settings.py")
-    frontend = _read("frontend/src/pages/Management/index.tsx")
-    api = _read("frontend/src/services/api.ts")
+    frontend = _read_frontend_page_tree("Management")
+    api = _read_frontend_services()
     migration = _read("backend/migrations/versions/010_dingtalk_app_identity_fields.py")
     for marker in ('app_id', 'agent_id'):
         assert marker in model, f"钉钉配置模型缺少 {marker}"
@@ -114,8 +136,8 @@ def check_aipaas_sync_contract() -> None:
     service = _read("backend/app/services/aipaas_service.py")
     router = _read("backend/app/routers/aipaas_sync.py")
     scheduler = _read("backend/app/services/crawler_scheduler.py")
-    frontend = _read("frontend/src/pages/Management/index.tsx")
-    api = _read("frontend/src/services/api.ts")
+    frontend = _read_frontend_page_tree("Management")
+    api = _read_frontend_services()
     migration = _read("backend/migrations/versions/016_aipaas_config_and_crawler_item_flags.py")
 
     assert "AipaasConfig" in model, "AIPAAS 配置模型缺少 AipaasConfig"
@@ -134,7 +156,7 @@ def check_aipaas_sync_contract() -> None:
 def check_browser_session_cookie_contract() -> None:
     auth_router = _read("backend/app/routers/auth.py")
     auth_dep = _read("backend/app/auth.py")
-    api = _read("frontend/src/services/api.ts")
+    api = _read_frontend_services()
     app = _read("frontend/src/app.tsx")
     compose = _read("docker-compose.yml")
 
@@ -267,10 +289,13 @@ def check_bot_enterprise_ops_contract() -> None:
     model = _read("backend/app/models.py")
     router = _read("backend/app/routers/bot.py")
     runtime = _read("backend/app/services/bot_runtime.py")
-    frontend_api = _read("frontend/src/services/api.ts")
-    frontend_page = _read("frontend/src/pages/BotCenter/index.tsx")
+    frontend_api = _read_frontend_services()
+    frontend_page = _read_frontend_page_tree("BotCenter")
     migration = _read("backend/migrations/versions/015_bot_enterprise_operations.py")
-    main = _read("backend/app/main.py")
+    sqlite_migration = (
+        _read("backend/app/sqlite_auto_migration.py")
+        + _read("backend/app/sqlite_bot_migration.py")
+    )
 
     for class_name in (
         "BotChannelAdapter",
@@ -300,7 +325,7 @@ def check_bot_enterprise_ops_contract() -> None:
         "bot_compliance_policies",
     ):
         assert table_name in migration, f"机器人运营迁移缺少 {table_name}"
-        assert table_name in main, f"SQLite 自动迁移缺少 {table_name}"
+        assert table_name in sqlite_migration, f"SQLite 自动迁移缺少 {table_name}"
 
     for route in (
         '"/channel-adapters"',
@@ -364,7 +389,7 @@ def check_password_policy_contract() -> None:
     auth = _read("backend/app/auth.py")
     users_router = _read("backend/app/routers/users.py")
     auth_router = _read("backend/app/routers/auth.py")
-    management = _read("frontend/src/pages/Management/index.tsx")
+    management = _read_frontend_page_tree("Management")
     assert "PASSWORD_MIN_LENGTH = 8" in auth, "密码最小长度必须由后端公共常量定义"
     assert "PASSWORD_MIN_LENGTH" in users_router, "用户创建/重置必须使用统一密码策略"
     assert "PASSWORD_MIN_LENGTH" in auth_router, "本人修改密码必须使用统一密码策略"
@@ -448,7 +473,7 @@ if missing:
 
 
 def check_crawler_failure_message_contract() -> None:
-    management = _read("frontend/src/pages/Management/index.tsx")
+    management = _read_frontend_page_tree("Management")
     assert "catch { message.error('采集失败'); }" not in management, "采集失败不能吞掉后端错误原因"
     assert "catch { message.error('测试失败'); }" not in management, "连接测试失败不能吞掉后端错误原因"
     assert "getApiErrorMessage(e, '采集失败')" in management, "采集失败需要展示后端错误原因"
@@ -461,8 +486,8 @@ def check_crawler_strategy_contract() -> None:
     crawler_config = _read("backend/app/routers/crawler_config.py")
     crawler_router = _read("backend/app/routers/crawler.py")
     coverage = _read("backend/scripts/crawler_coverage_acceptance.py")
-    api = _read("frontend/src/services/api.ts")
-    management = _read("frontend/src/pages/Management/index.tsx")
+    api = _read_frontend_services()
+    management = _read_frontend_page_tree("Management")
     for marker in (
         "complete_crawler_source_rules",
         "dynamic_public_html_probe_v1",
@@ -537,7 +562,7 @@ def check_api_error_message_contract() -> None:
 
 def check_frontend_management_tone() -> None:
     layout = _read("frontend/src/layouts/EditorialLayout.tsx")
-    management = _read("frontend/src/pages/Management/index.tsx")
+    management = _read_frontend_page_tree("Management")
     assert "format('DDD')" not in layout, "页眉期号不能依赖未启用的 day-of-year 格式"
     assert "format('YYYYMMDD')" in layout, "页眉期号必须使用稳定日期格式"
     assert "getPermissionLabel(p)" in management, "管理页角色矩阵必须展示业务权限名称"
@@ -549,7 +574,11 @@ def check_frontend_management_tone() -> None:
         "frontend/src/pages/Opportunities/index.tsx",
         "frontend/src/pages/OpportunityRadar/index.tsx",
     ):
-        text = _read(path)
+        if path.startswith("frontend/src/pages/"):
+            page = path.split("/")[3]
+            text = _read_frontend_page_tree(page)
+        else:
+            text = _read(path)
         for marker in ("✅", "⚠️"):
             assert marker not in text, f"{path} 不应使用临时符号化提示：{marker}"
         for marker in ("后续接", "待接入", "未实现"):
@@ -559,10 +588,10 @@ def check_frontend_management_tone() -> None:
 
 
 def check_frontend_permission_gates() -> None:
-    api = _read("frontend/src/services/api.ts")
+    api = _read_frontend_services()
     layout = _read("frontend/src/layouts/EditorialLayout.tsx")
-    dashboard = _read("frontend/src/pages/Dashboard/index.tsx")
-    intelligence = _read("frontend/src/pages/Intelligence/index.tsx")
+    dashboard = _read_frontend_page_tree("Dashboard")
+    intelligence = _read_frontend_page_tree("Intelligence")
     lead_review = _read("frontend/src/pages/OpportunityRadar/index.tsx")
     assert "userHasPermission" in api, "前端必须有统一权限判断函数"
     assert "canAccessPath" in layout and "management:view" in layout, "导航必须按权限控制管理入口"
@@ -582,7 +611,7 @@ def check_external_links_are_noopener() -> None:
 
 
 def check_html_preview_is_sandboxed() -> None:
-    dashboard = _read("frontend/src/pages/Dashboard/index.tsx")
+    dashboard = _read_frontend_page_tree("Dashboard")
     assert "function sanitizeHtmlForPreview" in dashboard, "报告 HTML 预览必须先清理脚本和事件属性"
     assert "container.innerHTML = sanitizeHtmlForPreview" in dashboard, "转图片临时渲染不能直接写入原始 HTML"
     assert 'sandbox=""' in dashboard, "报告预览 iframe 必须启用 sandbox"
@@ -592,8 +621,8 @@ def check_html_preview_is_sandboxed() -> None:
 def check_department_weekly_archive_contract() -> None:
     model = _read("backend/app/models.py")
     reports_router = _read("backend/app/routers/reports.py")
-    api = _read("frontend/src/services/api.ts")
-    dashboard = _read("frontend/src/pages/Dashboard/index.tsx")
+    api = _read_frontend_services()
+    dashboard = _read_frontend_page_tree("Dashboard")
     migration = _read("backend/migrations/versions/011_department_weekly_reports.py")
     assert "class DepartmentWeeklyReport" in model, "部门周报必须有独立归档模型"
     assert "MAX_DEPARTMENT_WEEKLY_HTML_BYTES = 8 * 1024 * 1024" in reports_router, "HTML 周报上传必须限制大小"
@@ -618,216 +647,6 @@ def check_opportunity_center_boundary_contract() -> None:
     assert "预测数据源" not in center, "商机中心不能把未接入预测做成指标"
     assert "待接入" not in center, "商机中心不能保留像功能入口的待接入文案"
     assert "商机中心待接入区" not in radar, "标讯线索确认不能指向不存在的商机待接入区"
-
-
-def check_public_html_response_contract() -> None:
-    for path in ("backend/app/routers/reports.py", "backend/app/routers/express.py"):
-        text = _read(path)
-        assert "_PUBLIC_HTML_HEADERS" in text, f"{path} 公开 HTML 必须设置统一响应头"
-        assert '"Cache-Control": "no-store"' in text, f"{path} 公开 HTML 必须禁止缓存"
-        assert '"X-Robots-Tag": "noindex, nofollow"' in text, f"{path} 公开 HTML 必须禁止搜索引擎索引"
-        assert '"X-Content-Type-Options": "nosniff"' in text, f"{path} 公开 HTML 必须设置 nosniff"
-        assert '"X-Frame-Options": "SAMEORIGIN"' in text, f"{path} 公开 HTML 必须限制跨站嵌入"
-        assert "return _public_html_response(html)" in text, f"{path} 公开正文必须走统一 HTML 响应"
-
-
-def check_container_deploy_contract() -> None:
-    compose = _read("docker-compose.yml")
-    backend_dockerfile = _read("backend/Dockerfile")
-    backend_ignore = _read("backend/.dockerignore")
-    frontend_dockerfile = _read("frontend/Dockerfile")
-    frontend_ignore = _read("frontend/.dockerignore")
-    nginx = _read("frontend/nginx.conf")
-    config = _read("backend/app/config.py")
-    assert "POSTGRES_PASSWORD:?set POSTGRES_PASSWORD" in compose, "Compose 不能给数据库密码设置弱默认值"
-    assert "JWT_SECRET_KEY:?set JWT_SECRET_KEY" in compose, "Compose 必须要求显式 JWT 密钥"
-    assert "SECRET_ENCRYPTION_KEY:?set SECRET_ENCRYPTION_KEY" in compose, "Compose 必须要求显式运行时密钥加密材料"
-    assert "ADMIN_PASSWORD:?set ADMIN_PASSWORD" in compose, "Compose 必须要求显式初始管理员密码"
-    assert "UPLOAD_API_KEY:?set UPLOAD_API_KEY" in compose, "Compose 必须要求显式上传 API Key"
-    assert "pg_isready -U ${POSTGRES_USER:-market} -d ${POSTGRES_DB:-market}" in compose, "数据库健康检查必须使用实际配置的库名和用户名"
-    assert "/api/ready" in compose, "后端容器健康检查必须使用 readiness"
-    assert "condition: service_healthy" in compose, "前端不能在后端未就绪时接流量"
-    assert "mcr.microsoft.com/playwright/python:v1.60.0-noble" in backend_dockerfile, "后端镜像 Playwright 版本必须与 requirements 对齐"
-    assert "apt-get install -y --no-install-recommends curl" in backend_dockerfile, "后端镜像必须包含采集 HTTP 兜底所需 curl"
-    assert "assert_production_security" in backend_dockerfile, "后端镜像迁移前必须先校验生产密钥"
-    assert "assert_production_security()' && python -m alembic upgrade head" in backend_dockerfile, "后端镜像必须先校验配置再执行迁移"
-    for marker in ("market.db", ".env", "output/", "cookies/"):
-        assert marker in backend_ignore, f"后端镜像构建必须排除 {marker}"
-    assert "RUN npm ci" in frontend_dockerfile, "前端镜像构建必须使用 lockfile 确定性安装"
-    for marker in ("node_modules", "dist", ".env"):
-        assert marker in frontend_ignore, f"前端镜像构建必须排除 {marker}"
-    assert "proxy_read_timeout 300s" in nginx, "前端反向代理超时必须覆盖长任务"
-    assert "location /r/" in nginx and "proxy_pass http://backend:8000/r/" in nginx, "生产 Nginx 必须代理报告分享链接"
-    assert "location /re/" in nginx and "proxy_pass http://backend:8000/re/" in nginx, "生产 Nginx 必须代理速递分享链接"
-    assert "X-Content-Type-Options" in nginx and "X-Frame-Options" in nginx, "Nginx 必须设置基础安全响应头"
-    assert "def assert_production_security" in config, "后端生产模式必须启动前拦截弱密钥"
-    assert "Production deployment requires strong explicit secrets" in config, "弱密钥错误必须清晰"
-
-    compose_config = subprocess.run(
-        ["docker", "compose", "--env-file", ".env.example", "config"],
-        cwd=ROOT,
-        capture_output=True,
-        text=True,
-        timeout=20,
-    )
-    assert compose_config.returncode == 0, compose_config.stderr
-    assert "condition: service_healthy" in compose_config.stdout, "Compose 解析后必须保留健康依赖"
-
-    script = "from app.config import assert_production_security; assert_production_security()"
-    base_env = os.environ.copy()
-    base_env.update({
-        "DATABASE_URL": "postgresql+asyncpg://market:secret@db:5432/market",
-        "JWT_SECRET_KEY": "change-me-in-production",
-        "SECRET_ENCRYPTION_KEY": "replace-with-at-least-32-random-characters",
-        "ADMIN_PASSWORD": "admin123",
-        "UPLOAD_API_KEY": "change-me-in-production",
-    })
-    weak = subprocess.run(
-        [sys.executable, "-c", script],
-        cwd=BACKEND,
-        env=base_env,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    assert weak.returncode != 0 and "Production deployment requires strong explicit secrets" in weak.stderr
-
-    strong_env = base_env.copy()
-    strong_env.update({
-        "JWT_SECRET_KEY": "j" * 40,
-        "SECRET_ENCRYPTION_KEY": "s" * 40,
-        "ADMIN_PASSWORD": "StrongAdminPassword2026!",
-        "UPLOAD_API_KEY": "u" * 40,
-    })
-    strong = subprocess.run(
-        [sys.executable, "-c", script],
-        cwd=BACKEND,
-        env=strong_env,
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
-    assert strong.returncode == 0, strong.stderr
-
-
-def _write_public_env(path: Path, *, secure_cookie: bool = True) -> None:
-    secure = "true" if secure_cookie else "false"
-    path.write_text(
-        "\n".join([
-            "COMPOSE_PROJECT_NAME=market-product",
-            "MARKET_DOMAIN=market.acme-corp.cn",
-            "ACME_EMAIL=ops@acme-corp.cn",
-            "POSTGRES_DB=market",
-            "POSTGRES_USER=market",
-            "POSTGRES_PASSWORD=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            "DATABASE_SCHEMA=marketing",
-            "JWT_SECRET_KEY=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
-            "SECRET_ENCRYPTION_KEY=cccccccccccccccccccccccccccccccccccccccc",
-            "ADMIN_USERNAME=admin",
-            "ADMIN_PASSWORD=dddddddddddddddddddddddddddddddddddddddd",
-            "UPLOAD_API_KEY=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-            "AUTH_COOKIE_NAME=market_session",
-            f"AUTH_COOKIE_SECURE={secure}",
-            "AUTH_COOKIE_SAMESITE=strict",
-            'CORS_ORIGINS=["https://market.acme-corp.cn"]',
-            "",
-        ]),
-        encoding="utf-8",
-    )
-
-
-def check_public_deployment_toolkit_contract() -> None:
-    prod_compose = _read("deploy/docker-compose.prod.yml")
-    caddyfile = _read("deploy/Caddyfile")
-    root_install = _read("install.sh")
-    install = _read("deploy/install.sh")
-    update = _read("deploy/update.sh")
-    marketctl = _read("deploy/marketctl.sh")
-    prod_env = _read("deploy/env.production.example")
-    smoke = _read("backend/scripts/deployment_smoke.py")
-    frontend_dockerignore = _read("frontend/.dockerignore")
-    gate = _read("backend/scripts/security_quality_gate.py")
-
-    assert "gateway:" in prod_compose and '\"80:80\"' in prod_compose and '\"443:443\"' in prod_compose, "生产部署必须只有公网网关入口"
-    for service in ("db", "backend", "frontend"):
-        block_start = prod_compose.index(f"  {service}:")
-        next_match = prod_compose.find("\n  ", block_start + 3)
-        block = prod_compose[block_start:] if next_match == -1 else prod_compose[block_start:next_match]
-        assert "\n    ports:" not in block, f"生产部署中 {service} 不得发布宿主机端口"
-    assert "internal: true" in prod_compose, "生产部署必须使用 Docker internal 网络隔离后端与数据库"
-    assert "AUTH_COOKIE_SECURE: ${AUTH_COOKIE_SECURE:-true}" in prod_compose, "生产部署必须默认 Secure Cookie"
-    assert "Strict-Transport-Security" in caddyfile and "reverse_proxy frontend:80" in caddyfile, "公网网关必须有 TLS 安全头和前端代理"
-    for command in ("init", "doctor", "gate", "up", "smoke", "update", "backup", "restore", "pack"):
-        assert f"{command})" in marketctl or f"cmd_{command}" in marketctl, f"部署工具缺少 {command} 命令"
-    assert "seed-snapshot)" in marketctl and "cmd_seed_snapshot" in marketctl, "部署工具必须提供快照导入命令"
-    assert "cmd_backup" in marketctl and "compose up -d --build --remove-orphans" in marketctl, "更新必须先备份再一键替换"
-    assert "cmd_smoke" in marketctl and "deployment_smoke.py" in marketctl, "部署工具必须提供上线冒烟"
-    assert "宿主机未安装 npm" in marketctl, "服务器部署不能强依赖宿主机 Node.js"
-    for excluded in (
-        "frontend/src/.umi",
-        "frontend/src/.umi-production",
-        "__pycache__",
-        "*.pyc",
-        "*.db",
-        "*.db-shm",
-        "*.db-wal",
-        "*.log",
-        ".DS_Store",
-    ):
-        assert f"--exclude='{excluded}'" in marketctl, f"部署包必须排除本机构建/缓存产物：{excluded}"
-    for excluded in ("src/.umi", "src/.umi-production", ".umi", ".umi-production"):
-        assert excluded in frontend_dockerignore, f"前端 Docker 上下文必须排除生成目录：{excluded}"
-    assert "MARKET_DOMAIN=market.example.com" in prod_env and "AUTH_COOKIE_SECURE=true" in prod_env, "生产 env 示例必须面向 HTTPS 公网"
-    assert "SECURITY GATE PASSED" in gate and "真实公网域名" in gate and "AUTH_COOKIE_SECURE=true" in gate, "安全门禁必须检查公网域名与 Cookie 策略"
-    assert "--domain" in marketctl and "--email" in marketctl and "security_quality_gate.py" in marketctl, "初始化 .env 必须要求域名邮箱并自动跑门禁"
-    assert 'deploy/install.sh" "$@"' in root_install, "根目录必须提供小白一键部署入口"
-    for marker in ("docker compose version", "marketctl.sh", "doctor", "init --domain", "up", "seed-snapshot", "smoke", "ADMIN_PASSWORD"):
-        assert marker in install, f"一键部署脚本缺少关键步骤：{marker}"
-    assert 'marketctl.sh" update' in update and "自动备份数据库" in update, "一键更新脚本必须调用受控更新流程"
-    for marker in ("/api/ready", "/api/auth/login", "/api/settings/system", "/api/crawlers/status", "/api/aipaas-sync/config"):
-        assert marker in smoke, f"上线冒烟脚本缺少核心接口检查：{marker}"
-
-    with tempfile.NamedTemporaryFile("w", delete=False) as ok_env:
-        ok_path = Path(ok_env.name)
-    with tempfile.NamedTemporaryFile("w", delete=False) as bad_env:
-        bad_path = Path(bad_env.name)
-    try:
-        _write_public_env(ok_path, secure_cookie=True)
-        ok = subprocess.run(
-            [sys.executable, "backend/scripts/security_quality_gate.py", "--env", str(ok_path), "--profile", "public"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        assert ok.returncode == 0, ok.stdout + ok.stderr
-
-        compose_config = subprocess.run(
-            ["docker", "compose", "--env-file", str(ok_path), "-f", "deploy/docker-compose.prod.yml", "config"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=20,
-        )
-        assert compose_config.returncode == 0, compose_config.stderr
-        assert 'published: "443"' in compose_config.stdout and 'published: "80"' in compose_config.stdout, "公网部署必须发布 80/443"
-        assert 'published: "5432"' not in compose_config.stdout and 'published: "8000"' not in compose_config.stdout, "公网部署不得发布数据库或后端端口"
-
-        _write_public_env(bad_path, secure_cookie=False)
-        bad = subprocess.run(
-            [sys.executable, "backend/scripts/security_quality_gate.py", "--env", str(bad_path), "--profile", "public"],
-            cwd=ROOT,
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        assert bad.returncode != 0 and "AUTH_COOKIE_SECURE=true" in bad.stdout, "安全门禁必须拦截公网非 Secure Cookie"
-    finally:
-        for path in (ok_path, bad_path):
-            try:
-                path.unlink()
-            except FileNotFoundError:
-                pass
 
 
 def check_database_migration_contract() -> None:

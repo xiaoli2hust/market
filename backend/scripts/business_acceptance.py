@@ -20,6 +20,20 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def _read_frontend_services() -> str:
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / "frontend/src/services").rglob("*.ts"))
+    )
+
+
+def _read_frontend_page_tree(page: str) -> str:
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / f"frontend/src/pages/{page}").rglob("*.ts*"))
+    )
+
+
 def check_bidding_express_period() -> None:
     from app.services import bidding_express_service as service
 
@@ -71,7 +85,7 @@ def check_bidding_express_period() -> None:
 def check_scheduler_per_crawler_contract() -> None:
     scheduler = _read("backend/app/services/crawler_scheduler.py")
     config_router = _read("backend/app/routers/crawler_config.py")
-    management = _read("frontend/src/pages/Management/index.tsx")
+    management = _read_frontend_page_tree("Management")
     crawler_router = _read("backend/app/routers/crawler.py")
     crawler_base = _read("backend/app/crawlers/base.py")
     diagnostics = _read("backend/app/crawlers/diagnostics.py")
@@ -139,7 +153,7 @@ def check_scheduler_per_crawler_contract() -> None:
 
 
 def check_intelligence_agent_pages() -> None:
-    page = _read("frontend/src/pages/Intelligence/index.tsx")
+    page = _read_frontend_page_tree("Intelligence")
     for category in ("bidding", "policy", "news", "competitor", "ai"):
         assert f"category: '{category}'" in page, f"市场洞察必须加载 {category} 分析"
     assert "竞对监控 Agent" in page, "竞对监控必须是独立 Agent 页"
@@ -152,7 +166,7 @@ def check_report_lifecycle_contract() -> None:
     service = _read("backend/app/services/report_service.py")
     reports = _read("backend/app/routers/reports.py")
     migration = _read("backend/migrations/versions/006_report_versions.py")
-    dashboard = _read("frontend/src/pages/Dashboard/index.tsx")
+    dashboard = _read_frontend_page_tree("Dashboard")
     assert "version:" in models and "superseded_at" in models, "报告模型必须包含版本和归档时间"
     assert "_prepare_report_version" in service, "生成报告前必须计算版本并归档可替换草稿"
     assert '_supersede_peer_reports' in reports and 'status = "published"' in reports, "推送成功必须发布当前版本并归档同周期旧版本"
@@ -161,8 +175,8 @@ def check_report_lifecycle_contract() -> None:
 
 
 def check_bidding_express_frontend_contract() -> None:
-    api = _read("frontend/src/services/api.ts")
-    dashboard = _read("frontend/src/pages/Dashboard/index.tsx")
+    api = _read_frontend_services()
+    dashboard = _read_frontend_page_tree("Dashboard")
     router = _read("backend/app/routers/bidding_express.py")
     assert "period_label" in api and "source_total" in api, "标讯速递接口类型必须返回周期和来源总数"
     assert "biddingPeriod" in dashboard and "generateBiddingExpress({" in dashboard, "前端生成标讯速递必须传入周期"

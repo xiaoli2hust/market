@@ -1,0 +1,11 @@
+export { renderChatTab } from './ChatTabView';
+export { renderSkillsTab } from './SkillsTabView';
+export { renderKnowledgeTab } from './KnowledgeTabView';
+export { renderChannelsTab } from './ChannelsTabView';
+export { renderTasksTab } from './TasksTabView';
+export { renderReleaseTab } from './ReleaseTabView';
+export { renderEvaluationTab } from './EvaluationTabView';
+export { renderCollaborationTab } from './CollaborationTabView';
+export { renderComplianceTab } from './ComplianceTabView';
+export { renderBroadcastTab } from './BroadcastTabView';
+export { renderLogsTab } from './LogsTabView';

@@ -1,0 +1,2 @@
+export const LONG_TASK_TIMEOUT_MS = 300000;
+export const CRAWLER_TASK_TIMEOUT_MS = 1800000;

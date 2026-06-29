@@ -61,6 +61,13 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
+def _read_frontend_page_tree(page: str) -> str:
+    return "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted((ROOT / f"frontend/src/pages/{page}").rglob("*.ts*"))
+    )
+
+
 def _source_ready(row: sqlite3.Row) -> bool:
     selectors = _selectors(row)
     source_type = selectors.get("type") or selectors.get("source_type") or "official_site"
@@ -341,7 +348,7 @@ def check_crawler_policy_contract() -> None:
     base = _read("backend/app/crawlers/base.py")
     crawler_router = _read("backend/app/routers/crawler.py")
     config_router = _read("backend/app/routers/crawler_config.py")
-    management = _read("frontend/src/pages/Management/index.tsx")
+    management = _read_frontend_page_tree("Management")
 
     for marker in (
         "CRAWL_RISK_PROFILES",
