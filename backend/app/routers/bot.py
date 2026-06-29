@@ -34,7 +34,6 @@ from ..models import (
     BotTask,
     BotTestCase,
     BotToolCall,
-    OperationLog,
 )
 from ..schemas import (
     BotApprovalRequest,
@@ -99,6 +98,26 @@ from ..services.bot_runtime import (
     upload_knowledge_text,
 )
 from ..services.dingtalk_service import send_markdown, send_text
+from .bot_serializers import (
+    _approval_to_dict,
+    _audit_log_to_dict,
+    _channel_binding_to_dict,
+    _collaboration_to_dict,
+    _conversation_to_dict,
+    _evaluation_run_to_dict,
+    _intent_correction_to_dict,
+    _knowledge_file_to_dict,
+    _log_operation,
+    _message_to_dict,
+    _profile_to_dict,
+    _skill_run_to_dict,
+    _skill_to_dict,
+    _task_to_dict,
+    _test_case_to_dict,
+    _tool_call_to_dict,
+    _user_id,
+    _user_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1266,282 +1285,3 @@ def _broadcast_to_dict(row: BotBroadcast) -> dict[str, Any]:
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
-
-
-def _profile_to_dict(row: BotProfile) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "profile_key": row.profile_key,
-        "name": row.name,
-        "description": row.description,
-        "system_prompt": row.system_prompt,
-        "default_role": row.default_role,
-        "status": row.status,
-        "allowed_skills": row.allowed_skills or [],
-        "config": row.config or {},
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-def _skill_to_dict(row: BotSkill) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "skill_key": row.skill_key,
-        "name": row.name,
-        "category": row.category,
-        "description": row.description,
-        "trigger_scenarios": row.trigger_scenarios or [],
-        "input_contract": row.input_contract or {},
-        "output_contract": row.output_contract or {},
-        "evidence_rules": row.evidence_rules or {},
-        "required_permission": row.required_permission,
-        "enabled": row.enabled,
-        "implementation_status": row.implementation_status,
-        "config": row.config or {},
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-def _conversation_to_dict(row: BotConversation) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "conversation_id": row.conversation_id,
-        "profile_key": row.profile_key,
-        "title": row.title,
-        "simulated_user_role": row.simulated_user_role,
-        "channel_type": row.channel_type,
-        "status": row.status,
-        "created_by_name": row.created_by_name,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-def _message_to_dict(row: BotMessage) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "role": row.role,
-        "content": row.content,
-        "content_type": row.content_type,
-        "source": row.source,
-        "meta": row.meta or {},
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-    }
-
-
-def _knowledge_file_to_dict(row: BotKnowledgeFile) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "file_id": row.file_id,
-        "title": row.title,
-        "file_name": row.file_name,
-        "content_type": row.content_type,
-        "source_type": row.source_type,
-        "category": row.category,
-        "status": row.status,
-        "review_status": row.review_status,
-        "visibility_scope": row.visibility_scope,
-        "owner_profile_key": row.owner_profile_key,
-        "tags": row.tags or [],
-        "version": row.version,
-        "expires_at": row.expires_at.isoformat() if row.expires_at else None,
-        "chunk_count": row.chunk_count,
-        "uploaded_by": row.uploaded_by,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-def _channel_binding_to_dict(row: BotChannelBinding) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "channel_key": row.channel_key,
-        "channel_type": row.channel_type,
-        "channel_name": row.channel_name,
-        "bot_profile_key": row.bot_profile_key,
-        "external_id": row.external_id,
-        "binding_config": row.binding_config or {},
-        "status": row.status,
-        "last_seen_at": row.last_seen_at.isoformat() if row.last_seen_at else None,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-def _skill_run_to_dict(row: BotSkillRun, tool_calls: list[dict[str, Any]]) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "run_id": row.run_id,
-        "conversation_pk": row.conversation_pk,
-        "message_id": row.message_id,
-        "profile_key": row.profile_key,
-        "skill_key": row.skill_key,
-        "status": row.status,
-        "input_payload": row.input_payload or {},
-        "output_payload": row.output_payload or {},
-        "evidence_records": row.evidence_records or [],
-        "started_at": row.started_at.isoformat() if row.started_at else None,
-        "finished_at": row.finished_at.isoformat() if row.finished_at else None,
-        "duration_ms": row.duration_ms,
-        "error_message": row.error_message,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "tool_calls": tool_calls,
-    }
-
-
-def _tool_call_to_dict(row: BotToolCall) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "skill_run_id": row.skill_run_id,
-        "tool_name": row.tool_name,
-        "status": row.status,
-        "input_payload": row.input_payload or {},
-        "output_payload": row.output_payload or {},
-        "duration_ms": row.duration_ms,
-        "error_message": row.error_message,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-    }
-
-
-def _audit_log_to_dict(row: BotAuditLog) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "event_type": row.event_type,
-        "profile_key": row.profile_key,
-        "conversation_id": row.conversation_id,
-        "skill_key": row.skill_key,
-        "actor_name": row.actor_name,
-        "payload": row.payload or {},
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-    }
-
-
-def _task_to_dict(row: BotTask) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "task_id": row.task_id,
-        "title": row.title,
-        "task_type": row.task_type,
-        "profile_key": row.profile_key,
-        "status": row.status,
-        "schedule_type": row.schedule_type,
-        "schedule_config": row.schedule_config or {},
-        "input_payload": row.input_payload or {},
-        "result_payload": row.result_payload or {},
-        "last_run_at": row.last_run_at.isoformat() if row.last_run_at else None,
-        "next_run_at": row.next_run_at.isoformat() if row.next_run_at else None,
-        "created_by_name": row.created_by_name,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-def _approval_to_dict(row: BotActionApproval) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "action_id": row.action_id,
-        "action_type": row.action_type,
-        "title": row.title,
-        "profile_key": row.profile_key,
-        "status": row.status,
-        "payload": row.payload or {},
-        "result_payload": row.result_payload or {},
-        "requested_by_name": row.requested_by_name,
-        "decided_by_name": row.decided_by_name,
-        "decided_at": row.decided_at.isoformat() if row.decided_at else None,
-        "executed_at": row.executed_at.isoformat() if row.executed_at else None,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-def _test_case_to_dict(row: BotTestCase) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "name": row.name,
-        "profile_key": row.profile_key,
-        "input_text": row.input_text,
-        "expected_skills": row.expected_skills or [],
-        "expected_contains": row.expected_contains or [],
-        "required_evidence": row.required_evidence,
-        "priority": row.priority,
-        "last_result": row.last_result or {},
-        "last_run_at": row.last_run_at.isoformat() if row.last_run_at else None,
-        "status": row.status,
-        "created_by_name": row.created_by_name,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-def _evaluation_run_to_dict(row: BotEvaluationRun) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "run_id": row.run_id,
-        "test_case_id": row.test_case_id,
-        "profile_key": row.profile_key,
-        "status": row.status,
-        "score": row.score,
-        "result_payload": row.result_payload or {},
-        "created_by_name": row.created_by_name,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-    }
-
-
-def _intent_correction_to_dict(row: BotIntentCorrection) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "phrase": row.phrase,
-        "profile_key": row.profile_key,
-        "expected_skills": row.expected_skills or [],
-        "notes": row.notes,
-        "status": row.status,
-        "created_by_name": row.created_by_name,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-    }
-
-
-def _collaboration_to_dict(row: BotCollaborationRun) -> dict[str, Any]:
-    return {
-        "id": row.id,
-        "run_id": row.run_id,
-        "title": row.title,
-        "lead_profile_key": row.lead_profile_key,
-        "participant_profiles": row.participant_profiles or [],
-        "input_text": row.input_text,
-        "status": row.status,
-        "result_payload": row.result_payload or {},
-        "evidence_records": row.evidence_records or [],
-        "created_by_name": row.created_by_name,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
-    }
-
-
-def _user_id(user: dict[str, Any]) -> int | None:
-    value = user.get("id")
-    return int(value) if isinstance(value, int) or str(value or "").isdigit() else None
-
-
-def _user_name(user: dict[str, Any]) -> str:
-    return str(user.get("display_name") or user.get("username") or user.get("sub") or "系统用户")
-
-
-def _log_operation(
-    db: AsyncSession,
-    user: dict[str, Any],
-    action: str,
-    target: str,
-    detail: str,
-) -> None:
-    db.add(
-        OperationLog(
-            user_id=_user_id(user),
-            username=_user_name(user),
-            action=action,
-            target=target,
-            detail=detail[:1000],
-        )
-    )
