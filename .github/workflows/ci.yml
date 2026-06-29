@@ -26,7 +26,7 @@ jobs:
       - name: Public deployment security gate
         run: |
           cat > /tmp/market-public.env <<'EOF'
-          COMPOSE_PROJECT_NAME=market-product
+          COMPOSE_PROJECT_NAME=market
           MARKET_DOMAIN=market.acme-corp.cn
           ACME_EMAIL=ops@acme-corp.cn
           POSTGRES_DB=market

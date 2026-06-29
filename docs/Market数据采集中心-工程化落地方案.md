@@ -107,11 +107,11 @@ Frontend (Umi/React)
 本地试用：
 
 ```bash
-cd /Users/xiaoli/Documents/market-product/backend
+cd /Users/xiaoli/Documents/market/backend
 pip install -r requirements.txt
 python3 -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 
-cd /Users/xiaoli/Documents/market-product/frontend
+cd /Users/xiaoli/Documents/market/frontend
 npm ci
 npm run dev -- --host 127.0.0.1 --port 8002
 ```

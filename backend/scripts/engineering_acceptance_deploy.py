@@ -110,7 +110,7 @@ def _write_public_env(path: Path, *, secure_cookie: bool = True) -> None:
     secure = "true" if secure_cookie else "false"
     path.write_text(
         "\n".join([
-            "COMPOSE_PROJECT_NAME=market-product",
+            "COMPOSE_PROJECT_NAME=market",
             "MARKET_DOMAIN=market.acme-corp.cn",
             "ACME_EMAIL=ops@acme-corp.cn",
             "POSTGRES_DB=market",

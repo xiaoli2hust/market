@@ -43,7 +43,7 @@ flowchart LR
 后端：
 
 ```bash
-cd /Users/xiaoli/Documents/market-product/backend
+cd /Users/xiaoli/Documents/market/backend
 pip install -r requirements.txt
 python3 -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 ```
@@ -51,7 +51,7 @@ python3 -m uvicorn app.main:app --reload --host 127.0.0.1 --port 8001
 前端：
 
 ```bash
-cd /Users/xiaoli/Documents/market-product/frontend
+cd /Users/xiaoli/Documents/market/frontend
 npm install
 npm run dev -- --host 127.0.0.1 --port 8002
 ```

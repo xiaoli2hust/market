@@ -10,7 +10,7 @@
 ## 本地启动
 
 ```bash
-cd /Users/xiaoli/Documents/market-product/frontend
+cd /Users/xiaoli/Documents/market/frontend
 npm install
 npm run dev -- --host 127.0.0.1 --port 8002
 ```

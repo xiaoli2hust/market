@@ -374,7 +374,7 @@ cmd_pack() {
   mkdir -p "$RELEASE_DIR"
   local stamp
   stamp="$(date +%Y%m%d-%H%M%S)"
-  local target="$RELEASE_DIR/market-product-$stamp.tar.gz"
+  local target="$RELEASE_DIR/market-$stamp.tar.gz"
   tar \
     --exclude='.git' \
     --exclude='.env' \
