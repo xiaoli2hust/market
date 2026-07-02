@@ -73,6 +73,7 @@ from ..services.bot_runtime import (
     ensure_bot_runtime_defaults,
     extract_text_from_html,
     handle_inbound_message,
+    implemented_bot_skill_keys,
     list_channel_adapters,
     list_compliance_policies,
     list_environments,
@@ -218,7 +219,13 @@ async def update_skill(
         raise HTTPException(status_code=404, detail="Skill 不存在")
     data = payload.model_dump(exclude_unset=True)
     if "enabled" in data:
-        row.enabled = bool(data["enabled"])
+        enabled = bool(data["enabled"])
+        if enabled and (
+            row.implementation_status != "implemented"
+            or row.skill_key not in implemented_bot_skill_keys()
+        ):
+            raise HTTPException(status_code=400, detail="该 Skill 尚未接入后端执行器，不能启用")
+        row.enabled = enabled
     if "config" in data:
         if data["config"] is not None and not isinstance(data["config"], dict):
             raise HTTPException(status_code=400, detail="Skill 配置格式不正确")

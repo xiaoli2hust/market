@@ -1296,7 +1296,11 @@ async def _select_skills(
     allowed = set(profile.allowed_skills or [])
     rows = (
         await db.execute(
-            select(BotSkill).where(BotSkill.enabled.is_(True), BotSkill.skill_key.in_(allowed))
+            select(BotSkill).where(
+                BotSkill.enabled.is_(True),
+                BotSkill.implementation_status == "implemented",
+                BotSkill.skill_key.in_(allowed),
+            )
         )
     ).scalars().all()
     by_key = {row.skill_key: row for row in rows}
@@ -1697,7 +1701,7 @@ async def _skill_not_implemented(
     message: str,  # noqa: ARG001
     run: BotSkillRun,  # noqa: ARG001
 ) -> tuple[dict[str, Any], list[dict[str, Any]], list[BotToolCall]]:
-    return {"message": "该 Skill 暂未绑定执行器"}, [], []
+    raise RuntimeError("该 Skill 尚未接入后端执行器，不能作为已启用能力运行")
 
 
 _SKILL_TOOLS: dict[str, Callable[[AsyncSession, str, BotSkillRun], Any]] = {
@@ -1709,6 +1713,10 @@ _SKILL_TOOLS: dict[str, Callable[[AsyncSession, str, BotSkillRun], Any]] = {
     "opportunity.followup_status": _skill_opportunity,
     "dingtalk.broadcast": _skill_dingtalk_broadcast,
 }
+
+
+def implemented_bot_skill_keys() -> set[str]:
+    return set(_SKILL_TOOLS)
 
 
 async def _synthesize_answer(
