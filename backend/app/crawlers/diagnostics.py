@@ -102,7 +102,15 @@ def classify_source_report(report: dict[str, Any]) -> dict[str, str]:
         return _diag("forbidden", "访问被拒绝", "warn", "检查公开访问权限；不要使用代理池或绕过登录")
     if "404" in text or "not found" in text:
         return _diag("not_found", "页面不存在", "error", "更新来源地址或停用该源")
-    if "timeout" in text or "timed out" in text or "connect" in text:
+    if (
+        "timeout" in text
+        or "timed out" in text
+        or "connect" in text
+        or "ssl" in text
+        or "certificate" in text
+        or "nodename" in text
+        or "name resolution" in text
+    ):
         return _diag("network_error", "网络或超时", "warn", "稍后重试；连续失败时降级来源")
     if "selector" in text or "解析" in error or "parse" in text:
         return _diag("parser_failed", "解析规则失效", "error", "更新列表、标题、链接、日期选择器")

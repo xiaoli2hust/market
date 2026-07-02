@@ -1,8 +1,4 @@
-"""Engineering acceptance checks for Market product.
-
-Run from repository root:
-    python3 backend/scripts/engineering_acceptance.py
-"""
+"""Engineering acceptance checks for Market product."""
 
 from __future__ import annotations
 
@@ -24,6 +20,7 @@ from engineering_acceptance_deploy import (
     check_public_deployment_toolkit_contract,
     check_public_html_response_contract,
 )
+from engineering_acceptance_crawler import check_crawler_runtime_guard_contract
 
 ROOT = Path(__file__).resolve().parents[2]
 BACKEND = ROOT / "backend"
@@ -774,6 +771,7 @@ def main() -> int:
         ("无虚假 Demo 入口", check_no_fake_demo_surfaces),
         ("干净 SQLite 启动", check_clean_sqlite_bootstrap),
         ("采集失败原因可见", check_crawler_failure_message_contract),
+        ("采集运行保护契约", check_crawler_runtime_guard_contract),
         ("爬虫策略分级契约", check_crawler_strategy_contract),
         ("爬虫数据归档契约", check_crawler_item_archive_contract),
         ("接口错误信息收敛", check_api_error_message_contract),

@@ -19,8 +19,9 @@ from bs4 import BeautifulSoup
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..config import settings
 from ..models import DingtalkConfig
-from ..secret_store import decrypt_secret
+from ..secret_store import decrypt_secret, encrypt_secret
 from .base import BaseCrawler, CrawlResult, CrawlStats, persist_crawler_result, _record_source_latest
 from .bidding_crawler_utils import (
     _contains_business_keyword,
@@ -70,11 +71,26 @@ class JianyuBiddingCrawler(BaseCrawler):
     async def _load_config(self, db: AsyncSession) -> None:
         """从数据库加载结构化标讯配置。"""
         row = (await db.execute(select(DingtalkConfig).limit(1))).scalar_one_or_none()
-        if not row:
-            return
-        self._username = row.jianyu_username or ""
-        self._password = decrypt_secret(row.jianyu_password)
-        self._api_key = decrypt_secret(row.jianyu_api_key)
+        self._username = (row.jianyu_username if row else "") or settings.JIANYU_USERNAME or ""
+        self._password = (
+            decrypt_secret(row.jianyu_password)
+            if row and row.jianyu_password
+            else settings.JIANYU_PASSWORD or ""
+        )
+        self._api_key = decrypt_secret(row.jianyu_api_key) if row and row.jianyu_api_key else ""
+
+    async def _persist_discovered_api_key(self, db: AsyncSession, api_key: str) -> None:
+        row = (await db.execute(select(DingtalkConfig).limit(1))).scalar_one_or_none()
+        if row is None:
+            row = DingtalkConfig(
+                jianyu_username=self._username or None,
+                jianyu_password=encrypt_secret(self._password) if self._password else None,
+                jianyu_api_key=encrypt_secret(api_key),
+            )
+            db.add(row)
+        elif not row.jianyu_api_key:
+            row.jianyu_api_key = encrypt_secret(api_key)
+        await db.flush()
 
     async def crawl(self, db: AsyncSession | None = None) -> list[CrawlResult]:
         """调用 API 获取标讯数据。"""
@@ -86,6 +102,8 @@ class JianyuBiddingCrawler(BaseCrawler):
         try:
             if not self._api_key and self._username and self._password:
                 self._api_key = await self._discover_api_key(self._username, self._password)
+                if db and self._api_key:
+                    await self._persist_discovered_api_key(db, self._api_key)
 
             if not self._api_key:
                 logger.warning("[bidding] 结构化标讯数据 key 未配置，跳过")
@@ -96,7 +114,7 @@ class JianyuBiddingCrawler(BaseCrawler):
                     "crawl_policy": {"risk_level": "authorized_api"},
                     "status": "skipped",
                     "found": 0,
-                    "error": "结构化标讯数据 key 未配置",
+                    "error": "结构化标讯数据 key 未配置，请在管理中心保存结构化标讯数据源账号密码或 Key",
                 })
             else:
                 # 调用 API（同步，API 很快）
@@ -596,12 +614,17 @@ class JianyuBiddingCrawler(BaseCrawler):
             items = await self.crawl(db=db)
             stats.total_found = len(items)
             stats.source_reports = list(self.source_reports)
-            source_error_count = sum(1 for report in stats.source_reports if report.get("status") == "error")
-            stats.errors += source_error_count
-            stats.error_messages.extend(
-                str(report.get("error"))
+            source_problem_count = sum(
+                1
                 for report in stats.source_reports
-                if report.get("status") == "error" and report.get("error")
+                if report.get("status") in {"error", "skipped"}
+            )
+            stats.errors += source_problem_count
+            stats.error_messages.extend(
+                str(report.get("error") or report.get("message"))
+                for report in stats.source_reports
+                if report.get("status") in {"error", "skipped"}
+                and (report.get("error") or report.get("message"))
             )
             logger.info("[bidding] API 获取 %d 条标讯", len(items))
         except Exception as e:
@@ -661,5 +684,4 @@ class JianyuBiddingCrawler(BaseCrawler):
         )
         await self.close()
         return stats
-
 

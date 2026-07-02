@@ -476,12 +476,17 @@ class BaseCrawler:
             items = await self.crawl()
             stats.total_found = len(items)
             stats.source_reports = list(getattr(self, "source_reports", []) or [])
-            source_error_count = sum(1 for report in stats.source_reports if report.get("status") == "error")
-            stats.errors += source_error_count
-            stats.error_messages.extend(
-                str(report.get("error"))
+            source_problem_count = sum(
+                1
                 for report in stats.source_reports
-                if report.get("status") == "error" and report.get("error")
+                if report.get("status") in {"error", "skipped"}
+            )
+            stats.errors += source_problem_count
+            stats.error_messages.extend(
+                str(report.get("error") or report.get("message"))
+                for report in stats.source_reports
+                if report.get("status") in {"error", "skipped"}
+                and (report.get("error") or report.get("message"))
             )
             logger.info("[%s] 爬取到 %d 条原始数据", self.name, len(items))
         except Exception as e:
@@ -767,5 +772,4 @@ def _add_crawler_evidence(db: AsyncSession, item: CrawlerItem) -> None:
         event_time=_published_datetime(item.published_at),
         payload=data,
     ))
-
 

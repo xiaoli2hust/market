@@ -117,6 +117,14 @@ CRAWLER_REGISTRY: dict[str, dict[str, Any]] = {
 _crawler_run_status: dict[str, dict[str, Any]] = {}
 CRAWLER_TASK_LOCK_TTL = timedelta(minutes=60)
 CRAWLER_TASK_HEARTBEAT_INTERVAL_SECONDS = 30
+CRAWLER_RUN_TIMEOUT_SECONDS = 240
+CRAWLER_RUN_TIMEOUT_BY_NAME = {
+    "bidding": 240,
+    "market": 180,
+    "policy": 180,
+    "competitor": 180,
+    "ai": 180,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -454,6 +462,7 @@ async def execute_crawlers(
 
         await db.commit()
         run_id: str | None = None
+        crawler: BaseCrawler | None = None
         _crawler_run_status[name] = {"status": "running", "stats": None}
 
         try:
@@ -466,28 +475,67 @@ async def execute_crawlers(
 
             heartbeat_task = _start_crawler_heartbeat(name, lock_owner, run_id)
             try:
-                stats = await crawler.run(db, keywords=keywords)
-                status = _status_from_stats(stats)
-                await _record_crawler_run(db, name, meta["category"], status, stats)
-                await _finish_crawler_task_run(db, run_id, status, stats.to_dict(), None)
-                await _release_crawler_task_lock(db, name, lock_owner)
-                await db.commit()
+                timeout_seconds = _crawler_run_timeout_seconds(name)
+                stats = await asyncio.wait_for(
+                    crawler.run(db, keywords=keywords),
+                    timeout=timeout_seconds,
+                )
             finally:
                 await _stop_crawler_heartbeat(heartbeat_task)
+
+            status = _status_from_stats(stats)
+            await _record_crawler_run(db, name, meta["category"], status, stats)
+            await _finish_crawler_task_run(db, run_id, status, stats.to_dict(), None)
+            await _release_crawler_task_lock(db, name, lock_owner)
+            await db.commit()
             _crawler_run_status[name] = {
                 "status": status,
                 "stats": stats.to_dict(),
             }
             results.append(_run_result_from_stats(name, stats))
+        except asyncio.TimeoutError:
+            timeout_seconds = _crawler_run_timeout_seconds(name)
+            message = f"{meta['label']}采集超过 {timeout_seconds} 秒，已自动中断并释放任务锁。请检查来源冷却状态、网络连通性或降低单轮源数量。"
+            await _close_crawler_safely(crawler)
+            await _record_crawler_runtime_failure(
+                db,
+                crawler_name=name,
+                category=meta["category"],
+                lock_owner=lock_owner,
+                run_id=run_id,
+                message=message,
+            )
+            _crawler_run_status[name] = {"status": "error", "stats": None}
+            results.append(CrawlRunResult(
+                crawler_name=name,
+                errors=1,
+                message=message,
+            ))
+        except asyncio.CancelledError:
+            message = f"{meta['label']}采集被中断，已释放任务锁。"
+            await _close_crawler_safely(crawler)
+            await _record_crawler_runtime_failure(
+                db,
+                crawler_name=name,
+                category=meta["category"],
+                lock_owner=lock_owner,
+                run_id=run_id,
+                message=message,
+            )
+            _crawler_run_status[name] = {"status": "error", "stats": None}
+            raise
         except Exception as e:
+            await _close_crawler_safely(crawler)
             _crawler_run_status[name] = {"status": "error", "stats": None}
             logger.error("爬虫 %s 运行失败: %s", name, e)
-            await _rollback_safely(db)
-            await _record_failed_run(db, name, meta["category"], str(e))
-            if run_id:
-                await _finish_crawler_task_run(db, run_id, "error", None, str(e))
-            await _release_crawler_task_lock(db, name, lock_owner)
-            await db.commit()
+            await _record_crawler_runtime_failure(
+                db,
+                crawler_name=name,
+                category=meta["category"],
+                lock_owner=lock_owner,
+                run_id=run_id,
+                message=str(e),
+            )
             results.append(CrawlRunResult(
                 crawler_name=name,
                 errors=1,
@@ -495,6 +543,36 @@ async def execute_crawlers(
             ))
 
     return results
+
+
+def _crawler_run_timeout_seconds(crawler_name: str) -> int:
+    return int(CRAWLER_RUN_TIMEOUT_BY_NAME.get(crawler_name, CRAWLER_RUN_TIMEOUT_SECONDS))
+
+
+async def _close_crawler_safely(crawler: BaseCrawler | None) -> None:
+    if crawler is None:
+        return
+    try:
+        await crawler.close()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("关闭爬虫 HTTP 客户端失败: %s", exc)
+
+
+async def _record_crawler_runtime_failure(
+    db: AsyncSession,
+    *,
+    crawler_name: str,
+    category: str,
+    lock_owner: str,
+    run_id: str | None,
+    message: str,
+) -> None:
+    await _rollback_safely(db)
+    await _record_failed_run(db, crawler_name, category, message)
+    if run_id:
+        await _finish_crawler_task_run(db, run_id, "error", None, message)
+    await _release_crawler_task_lock(db, crawler_name, lock_owner)
+    await db.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -1228,6 +1306,8 @@ def _runtime_status_from_diagnosis(diagnosis_code: str, report: dict[str, Any]) 
         return "blocked"
     if diagnosis_code in {"missing_config", "skipped"} or report.get("status") == "skipped":
         return "skipped"
+    if diagnosis_code in {"not_found", "network_error", "parser_failed", "unknown_error"}:
+        return "error"
     if report.get("status") == "ok":
         return "healthy"
     return "error"
@@ -1240,6 +1320,12 @@ def _cooldown_until(diagnosis_code: str, failures: int, now: datetime) -> dateti
         return now + timedelta(days=1)
     if diagnosis_code == "rate_limited":
         return now + timedelta(hours=6)
+    if diagnosis_code == "not_found":
+        return now + timedelta(days=7)
+    if diagnosis_code == "network_error":
+        return now + timedelta(hours=6)
+    if diagnosis_code == "parser_failed":
+        return now + timedelta(hours=12)
     if diagnosis_code in {"missing_config", "skipped"}:
         return None
     if failures >= 5:
