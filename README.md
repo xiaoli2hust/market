@@ -73,7 +73,7 @@ npm run dev -- --host 127.0.0.1 --port 8002
 仓库包含一份脱敏后的初始快照：
 
 - 文件：`backend/app/fixtures/market_snapshot.json`
-- 内容：118 个采集源、1 组关键词配置、1 组调度配置、359 条市场信号、359 条证据记录、359 条情报事件、94 条标讯线索。
+- 内容：118 个采集源、1 组关键词配置、1 组调度配置、404 条市场信号、404 条证据记录、404 条情报事件、94 条标讯线索。
 - 不包含：剑鱼账号密码、钉钉密钥、真实 `.env`、本地数据库文件、上传周报 HTML、第三方网页全文。
 
 本地空库导入：
@@ -86,6 +86,18 @@ PYTHONPATH=backend python3 backend/scripts/import_market_snapshot.py
 
 ```bash
 python3 backend/scripts/export_market_snapshot.py --db backend/market.db
+```
+
+给运维交付本机已采集数据：
+
+1. 双击根目录的 `ops_export.command`。
+2. 桌面会生成 `Market-ops-delivery-时间.zip`。
+3. 把这个 zip 发给运维。
+
+运维在服务器导入外部快照：
+
+```bash
+./deploy/marketctl.sh seed-snapshot /解压目录/market_snapshot.json
 ```
 
 ## 一键部署

@@ -22,7 +22,7 @@ Market 数据采集中心部署工具
   ./deploy/marketctl.sh gate        运行安全与质量门禁
   ./deploy/marketctl.sh up          首次构建并启动生产服务
   ./deploy/marketctl.sh smoke       上线后冒烟验证登录、健康检查和核心接口
-  ./deploy/marketctl.sh seed-snapshot 导入仓库内置的脱敏采集源与市场数据快照
+  ./deploy/marketctl.sh seed-snapshot [快照文件] 导入脱敏采集源与市场数据快照
   ./deploy/marketctl.sh update      备份数据库、运行门禁、重建并替换服务
   ./deploy/marketctl.sh backup      备份 PostgreSQL 数据库
   ./deploy/marketctl.sh restore FILE 从备份 SQL 恢复数据库
@@ -306,6 +306,16 @@ cmd_up() {
 
 cmd_seed_snapshot() {
   require_env
+  local fixture="${1:-}"
+  if [[ -n "$fixture" ]]; then
+    if [[ ! -f "$fixture" ]]; then
+      echo "快照文件不存在: $fixture" >&2
+      exit 1
+    fi
+    compose cp "$fixture" backend:/tmp/market_snapshot.json
+    compose exec -T backend python scripts/import_market_snapshot.py --fixture /tmp/market_snapshot.json
+    return
+  fi
   compose exec -T backend python scripts/import_market_snapshot.py
 }
 
@@ -412,7 +422,7 @@ case "${1:-}" in
   gate) cmd_gate ;;
   up) cmd_up ;;
   smoke) shift; cmd_smoke "$@" ;;
-  seed-snapshot) cmd_seed_snapshot ;;
+  seed-snapshot) shift; cmd_seed_snapshot "${1:-}" ;;
   update) cmd_update ;;
   backup) cmd_backup ;;
   restore) shift; cmd_restore "${1:-}" ;;

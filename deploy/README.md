@@ -83,6 +83,12 @@ bash deploy/update.sh
 ./deploy/marketctl.sh seed-snapshot
 ```
 
+如需导入业务负责人单独发来的本机采集快照：
+
+```bash
+./deploy/marketctl.sh seed-snapshot /解压目录/market_snapshot.json
+```
+
 ## 后续更新
 
 把新代码覆盖到服务器项目目录后执行：
@@ -100,6 +106,7 @@ bash deploy/update.sh
 ./deploy/marketctl.sh logs
 ./deploy/marketctl.sh smoke
 ./deploy/marketctl.sh seed-snapshot
+./deploy/marketctl.sh seed-snapshot /解压目录/market_snapshot.json
 ./deploy/marketctl.sh backup
 ./deploy/marketctl.sh pack
 ```
